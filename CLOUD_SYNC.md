@@ -1,4 +1,6 @@
-# AutoReport 登入與跨裝置雲端同步（Supabase）
+# AutoReport Modern 登入與跨裝置雲端同步（Supabase）
+
+本儲存庫沿用原 AutoReport 的 Supabase 公開設定與 `app: "autoreport"`，以便在原站與新版之間還原同一份備份。新版部署尚未建立。若要讓新版使用另一個資料空間，需另建 Supabase 專案與資源並更新本儲存庫設定；只更換 Vercel 網址不會隔離雲端資料。
 
 兩個網站都準備啟用，使用兩個獨立 Supabase 專案。AutoReport 專案建議命名 `autoreport`；TWStockSearch 使用另一個 `twstocksearch` 專案。不同資料格式可以共用 PostgreSQL 專案，但本版為 AutoReport 使用專用資料表、函式及私人檔案儲存空間，不修改其他網站資源。每位使用者的備份分開保存，資料透過 HTTPS 傳送至私人 Storage bucket；PostgreSQL 保存目前版本及檔案位置。RLS 限制每位使用者只能讀寫自己的資料，匿名訪客不能存取。這不是團隊共用資料庫。
 
@@ -17,11 +19,11 @@
 
 1. 在 Supabase 建立或選擇專案，建議命名 `autoreport`。保留資料庫密碼在安全位置，網站不需要資料庫密碼。
 2. 在 SQL Editor 執行本儲存庫的 `supabase/schema.sql`。請使用本儲存庫的 AutoReport 專用 SQL。它會建立 `public.autoreport_workspaces`、`public.commit_autoreport_workspace` 與私人 bucket `autoreport-sync`，只允許 `app=autoreport`。先前共用版本的資源會保留，不會刪除或自動搬移舊備份。確認 `autoreport-sync` bucket 為 **Private**，大小限制 50 MB。若既有同名 bucket 設定不同，先檢查並修正，不要開放公開讀取。不要另外加入允許所有人的資料表或 Storage policy。
-3. 在 Authentication 啟用 Email 登入及郵件驗證。將 Site URL 設為正式網站，URL Configuration 的 Redirect URLs 加入 `https://meng049-cmd.github.io/AutoReport/`。正式使用請設定可用的 SMTP 寄信服務與寄信限制，先測試確認信；預設寄信服務可能有限制。
+3. 若使用 Email 登入模式，在 Authentication 啟用 Email 登入及郵件驗證。新版部署後，將 Vercel 正式網址加入 Supabase 的 Redirect URLs；目前沒有新版正式網址，不要填入猜測的網域。正式使用請設定可用的 SMTP 寄信服務與寄信限制，先測試確認信。
 4. 從 Supabase 專案取得 Project URL 與 **Publishable key**（舊版 `anon` key 亦可）。在下列設定檔填入 `url` 及 `publishableKey`，保留 `app` 為 `autoreport`：
    - AutoReport：`cloud/cloud-config.js`
    這兩項為公開瀏覽器設定。**絕對不能填 service_role、secret key 或資料庫密碼**。安全性來自登入 JWT、私人 bucket 與 RLS，而不是隱藏 publishable key。
-5. AutoReport 執行 `npm run build`，將 `dist/` 依既有流程部署。新版網站與專用 SQL 需一起更新，因為新版不再使用原先共用的資源名稱。不要只發布 HTML。
+5. AutoReport Modern 執行 `bash scripts/build-vercel.sh`，將 `dist/` 部署到所選網站。不要只發布 HTML。
 6. 雲端開發環境若要連線驗證，需在環境網路允許清單新增實際專案的 `<project-ref>.supabase.co`。沒有專案時不需要新增猜測的網域或萬用允許規則。
 
 尚未填設定時，網頁會顯示「尚未設定雲端服務」，原本的本機功能可繼續使用。只有執行 SQL、填入公開設定並部署後，真實登入與雲端同步才啟用；模擬測試不代表線上服務已驗證。
