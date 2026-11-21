@@ -1,0 +1,295 @@
+/*
+ * AutoReport Modern dashboard skin.
+ * Visual direction follows the current shadcn dashboard pattern: compact slate
+ * navigation, a restrained workspace header, clear cards, and cobalt actions.
+ * The existing application markup and data workflows stay intact.
+ */
+:root {
+  color-scheme: light;
+  --ink: #0f172a;
+  --muted: #64748b;
+  --teal: #2563eb;
+  --teal-dark: #1d4ed8;
+  --line: #e2e8f0;
+  --paper: #fff;
+  --canvas: #f8fafc;
+  --blue: #2563eb;
+  --shadow: 0 1px 2px rgba(15, 23, 42, .045), 0 5px 16px rgba(15, 23, 42, .025);
+  font-family: Inter, "Noto Sans TC", "PingFang TC", system-ui, -apple-system, sans-serif;
+  color: var(--ink);
+  background: var(--canvas);
+}
+
+html { background: var(--canvas); }
+body {
+  min-width: 320px;
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+/* Account and manual backup controls use the same surface as the app. */
+.cloud-sync {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  font-family: inherit;
+}
+.cloud-sync summary { color: var(--ink); }
+.cloud-sync input { border-color: var(--line); border-radius: 8px; }
+.cloud-sync input:focus { outline: 3px solid rgba(37, 99, 235, .15); border-color: #93c5fd; }
+.cloud-sync button {
+  min-height: 38px;
+  border: 1px solid #2563eb;
+  border-radius: 8px;
+  background: #2563eb;
+  font-family: inherit;
+}
+.cloud-sync :focus-visible { outline: 3px solid rgba(37, 99, 235, .35); outline-offset: 2px; }
+body:not(.analysis-is-locked) > .cloud-sync {
+  margin: 16px 32px 16px 280px;
+  width: calc(100% - 312px);
+}
+
+/* Persistent workspace navigation. */
+.sidebar {
+  width: 248px;
+  padding: 18px 13px;
+  border-right: 1px solid #1e293b;
+  background: #0f172a;
+  color: #cbd5e1;
+  box-shadow: 4px 0 18px rgba(15, 23, 42, .06);
+}
+.sidebar-brand {
+  gap: 11px;
+  margin: 0 3px 20px;
+  padding: 4px 8px 16px;
+  border-bottom: 1px solid #1e293b;
+  color: #f8fafc;
+  font-size: 15px;
+  letter-spacing: .025em;
+}
+.sidebar-brand > span {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+.sidebar-label {
+  margin: 20px 10px 7px;
+  color: #64748b;
+  font-size: 10px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.sidebar nav { gap: 3px; }
+.sidebar nav a {
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1.4;
+  transition: background .16s ease, color .16s ease, border-color .16s ease;
+}
+.sidebar nav a > span { color: #94a3b8; }
+.sidebar nav a:hover { background: #172338; color: #f8fafc; }
+.sidebar nav a[aria-current="page"] {
+  border-color: #263750;
+  background: #1e293b;
+  color: #fff;
+  box-shadow: inset 2px 0 #60a5fa;
+}
+.sidebar nav a[aria-current="page"] > span { color: #93c5fd; }
+
+/* Compact title bar replaces the large gradient banner. */
+main {
+  width: calc(100% - 248px);
+  max-width: none;
+  min-height: 100vh;
+  margin: 0 0 0 248px;
+  padding: 0 30px 48px;
+}
+.hero {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  min-height: 68px;
+  gap: 14px;
+  margin: 0 -30px 22px;
+  padding: 12px 30px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: rgba(255, 255, 255, .94);
+  box-shadow: none;
+  color: var(--ink);
+  backdrop-filter: blur(14px);
+}
+.hero:after { display: none; }
+.hero .label {
+  color: #64748b;
+  font-size: 9px;
+  letter-spacing: .13em;
+}
+.hero h1 {
+  margin: 2px 0 0;
+  color: var(--ink);
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -.015em;
+}
+.hero-link {
+  margin-left: auto;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 600;
+}
+.hero-link:hover { border-color: #cbd5e1; background: #f8fafc; color: #0f172a; transform: none; }
+.nav-toggle { display: none; }
+
+/* Work surfaces and form controls. */
+.panel {
+  margin-top: 0;
+  margin-bottom: 16px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+  scroll-margin-top: 86px;
+}
+.panel h2 {
+  margin: 0 0 14px;
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -.012em;
+}
+.panel h3 { color: #1e293b; font-weight: 620; }
+p { color: var(--muted); }
+.muted { color: #64748b; }
+input, select, textarea, button {
+  border-color: #cbd5e1;
+  border-radius: 8px;
+}
+input, select, textarea { color: #0f172a; }
+input:focus, select:focus, textarea:focus, button:focus-visible {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .13);
+}
+button {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+  font-weight: 600;
+}
+button:hover:not(:disabled) { border-color: #1d4ed8; background: #1d4ed8; transform: translateY(-1px); }
+button.secondary {
+  border-color: #cbd5e1;
+  background: #fff;
+  color: #334155;
+}
+button.secondary:hover:not(:disabled) { border-color: #94a3b8; background: #f8fafc; color: #0f172a; }
+button:disabled { opacity: .48; }
+input[type=file]::file-selector-button {
+  border-color: #dbe3ed;
+  background: #f8fafc;
+  color: #334155;
+}
+input[type=file]::file-selector-button:hover { background: #eff6ff; }
+
+.metrics { gap: 12px; }
+.metric {
+  border: 1px solid var(--line);
+  border-left: 3px solid #3b82f6;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .025);
+}
+.metric strong { color: #0f172a; font-variant-numeric: tabular-nums; }
+.metric span { color: #64748b; }
+.dashboard-panel { border-color: var(--line); background: #fff; }
+.stage-model-group { border-color: #dbeafe; background: #f8fbff; }
+.stage-model-group > h3 { color: #1d4ed8; }
+.stage-card, .defect-level {
+  border-color: var(--line);
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .025);
+}
+.stage-card h3 { color: #1e293b; }
+#qualitySelection { border-left-color: #3b82f6; background: #f8fafc; color: #475569; }
+.range-controls, .formula-notes { border-color: var(--line); background: #f8fafc; }
+.formula-notes summary { color: #1d4ed8; }
+.defect-group { border-color: var(--line); background: #f8fafc; }
+.defect-group[aria-pressed=true] { border-color: #93c5fd; background: #eff6ff; box-shadow: inset 3px 0 #2563eb; }
+.file-tabs a[aria-current=page] { border-color: #bfdbfe; background: #eff6ff; color: #1d4ed8; }
+.badge { background: #eff6ff; color: #1d4ed8; }
+table { color: #334155; }
+td, th { border-bottom-color: #e2e8f0; }
+th { background: #f8fafc; color: #475569; font-weight: 650; }
+tbody tr:hover { background: #f8fafc; }
+.scroll { scrollbar-color: #cbd5e1 #f8fafc; }
+dialog { border-color: var(--line); border-radius: 14px; }
+dialog::backdrop { background: rgba(15, 23, 42, .42); }
+
+@media (min-width: 1600px) {
+  main { padding-right: 42px; padding-left: 42px; }
+  .hero { margin-right: -42px; margin-left: -42px; padding-right: 42px; padding-left: 42px; }
+}
+
+@media (max-width: 850px) {
+  .sidebar {
+    z-index: 30;
+    width: 248px;
+    transform: translateX(-100%);
+    transition: transform .2s ease;
+  }
+  body[data-nav-open="true"] .sidebar { transform: translateX(0); }
+  .nav-toggle {
+    display: block;
+    padding: 7px 10px;
+    border: 1px solid var(--line);
+    background: #fff;
+    color: #334155;
+  }
+  main { width: 100%; margin-left: 0; padding: 0 16px 32px; }
+  .hero { min-height: 64px; margin: 0 -16px 16px; padding: 10px 16px; }
+  .hero h1 { font-size: 17px; }
+  .nav-backdrop { display: none; }
+  body[data-nav-open="true"] .nav-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 29;
+    border: 0;
+    border-radius: 0;
+    background: rgba(15, 23, 42, .42);
+  }
+  body:not(.analysis-is-locked) > .cloud-sync { margin: 12px 16px; width: calc(100% - 32px); }
+}
+
+@media (max-width: 560px) {
+  main { padding-right: 10px; padding-left: 10px; }
+  .hero { margin-right: -10px; margin-left: -10px; padding-right: 10px; padding-left: 10px; }
+  .panel { padding: 14px; border-radius: 10px; }
+  .hero-link { padding: 7px 8px; font-size: 11px; }
+  .hero .label { display: none; }
+  .hero h1 { font-size: 16px; }
+  .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+}
