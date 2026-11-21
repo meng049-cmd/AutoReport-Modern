@@ -41,9 +41,7 @@ jobs:
         run: npm ci --include=dev
 
       - name: Build non-email-login website
-        run: npm run build
-        env:
-          AUTOREPORT_ANONYMOUS_CLOUD: '1'
+        run: bash scripts/build-no-email.sh
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v6
