@@ -4,7 +4,7 @@
 
 - Repository：meng049-cmd/AutoReport-Modern，主分支 main。
 - 以 meng049-cmd/AutoReport 的 main 程式快照為基礎建立獨立專案。
-- 新版目前僅完成介面主題調整，尚未部署；原正式網站不受影響。
+- 新版已部署至 https://meng049-cmd.github.io/AutoReport-Modern/；GitHub Actions 會從 main 自動建置與發布，採免信箱登入模式。原正式網站不受影響。
 - 視覺方向參考 Kiranism shadcn dashboard starter；本專案沿用原生 ES module 架構，保留原本資料處理流程。
 
 ## 修改範圍
@@ -28,5 +28,5 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 npm run build
 
-npm run build 會輸出至 dist/。正式 Vercel 部署設定請看 VERCEL_DEPLOYMENT.md。新版與原站分開部署；不要把原站部署資訊誤認為新版已上線。
+npm run build 會輸出至 dist/。GitHub Pages 自動部署使用 `bash scripts/build-no-email.sh`。Vercel 設定請看 VERCEL_DEPLOYMENT.md。新版與原站分開部署。
 

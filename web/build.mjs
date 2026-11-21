@@ -34,6 +34,11 @@ for(const name of ['openpyxl-3.1.5-py2.py3-none-any.whl','et_xmlfile-2.0.0-py3-n
 
 await mkdir('dist/cloud');
 for (const name of ['cloud-sync.mjs','cloud-sync.css','cloud-config.js']) await copyFile('cloud/'+name, 'dist/cloud/'+name);
+const cloudSyncPath='dist/cloud/cloud-sync.mjs';
+const cloudSyncSource=await readFile(cloudSyncPath,'utf8');
+const cloudConfigImport="from './cloud-config.js'";
+if(!cloudSyncSource.includes(cloudConfigImport))throw new Error('Could not find the cloud config import to version.');
+await writeFile(cloudSyncPath,cloudSyncSource.replace(cloudConfigImport,`from './cloud-config.js?v=${buildId}'`));
 
 let sourceCommit=process.env.VERCEL_GIT_COMMIT_SHA||process.env.AUTOREPORT_SOURCE_COMMIT||null;
 if(!sourceCommit){try{sourceCommit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim();}catch{}}

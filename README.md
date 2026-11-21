@@ -11,9 +11,10 @@
 - 保留原本的頁面路由、分析功能、Excel 匯出與檔案儲存流程。
 - 主題樣式位於 `web/modern-dashboard.css`；原有分析與檔案處理模組未改寫。
 
-本專案主分支 `main` 是新版原始碼；目前尚未部署新版。原正式網站仍由原始 AutoReport 專案提供：[AutoReport](https://auto-report-five.vercel.app/)。
+本專案主分支 `main` 是新版原始碼。新版已部署至 [GitHub Pages](https://meng049-cmd.github.io/AutoReport-Modern/)，由 `.github/workflows/deploy-pages.yml` 自動建置與發布。原正式網站仍由原始 AutoReport 專案提供：[AutoReport](https://auto-report-five.vercel.app/)。
 
-- 新版部署方式：[Vercel 部署說明](VERCEL_DEPLOYMENT.md)
+- GitHub Pages 使用免信箱登入模式；分析功能可直接使用，雲端備份須自行啟用並手動操作。
+- Vercel 部署方式：[Vercel 部署說明](VERCEL_DEPLOYMENT.md)
 - 手動雲端同步設定：[雲端同步設定](CLOUD_SYNC.md)
 
 ## 系統用途與六個分析製程
@@ -118,7 +119,7 @@
 
 ## 開發
 
-應用程式原始碼以 `main` 為準；`gh-pages` 用於 GitHub Pages 部署，報表分支存放報表成果。部署細節請參考上方部署文件。
+應用程式原始碼以 `main` 為準；GitHub Actions 會從 `main` 建置靜態網站並部署至 GitHub Pages。報表分支存放報表成果。
 
 基本建置：
 
