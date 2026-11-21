@@ -9,7 +9,7 @@ async function initialize(){
  for(const name of ['autoreport.py','update_database.py'])py.FS.writeFile('/app/'+name,await get('browser-python/'+name));
  await py.runPythonAsync("import sys\nsys.path[:0]=['/app','/app/packages']\nimport autoreport, update_database");runtime=py;return runtime;
 }
-self.onmessage=({data:{id,type,file}})=>{if(!navigator.locks){self.postMessage({id,error:'請使用支援本地資料庫更新的最新版 Chrome／Edge。'});return;}navigator.locks.request('AutoReport-local-database',async()=>{try{
+self.onmessage=({data:{id,type,file}})=>{if(!navigator.locks){self.postMessage({id,error:'請使用支援本地資料庫更新的最新版 Chrome／Edge。'});return;}navigator.locks.request('AutoReport-Part-local-database',async()=>{try{
  let state=await readBrowserDatabase();
  if(type==='clear'){
   self.postMessage({id,progress:'正在清空本瀏覽器資料庫…'});
@@ -26,24 +26,21 @@ self.onmessage=({data:{id,type,file}})=>{if(!navigator.locks){self.postMessage({
  if(type==='download'){const bytes=state?.database?new Uint8Array(state.database):await get('autoreport.sqlite3');self.postMessage({id,result:bytes.buffer},[bytes.buffer]);return;}
  if(type==='confirmCorrections'){
   if(!Array.isArray(file)||!file.length)throw Error('請先套用補填結果。');
-  self.postMessage({id,progress:'正在儲存已確認的工單補填對照…'});
+  self.postMessage({id,progress:'正在儲存已確認的料號補填對照…'});
   const current=state?.reference||JSON.parse(new TextDecoder().decode(await get('reference.json')));
-  const corrections=[...(current.manual_corrections||[])];
-  for(const item of file){
-   if(!item.order||!item.ic||!item.model)throw Error('補填資料缺少工單、IC 或機種，請重新套用結果。');
-   let terms;try{terms=JSON.parse(item.key);}catch{throw Error('補填對照的查找條件無效，請重新套用結果。');}
-   const order=terms.find(([kind])=>kind==='order')?.[1]||item.order,part=terms.find(([kind])=>kind==='part')?.[1]||'';
-   const index=corrections.findIndex(row=>row.order===order&&(row.part||'')===part);
-   const saved={order,part,ic:item.ic,model:item.model,confirmed_at:new Date().toISOString()};
-   if(item.override||corrections[index]?.override)Object.assign(saved,{override:true,family:item.override?item.family||'':corrections[index].family||''});
-   if(index>=0)corrections[index]=saved;else corrections.push(saved);
-  }
+  const updates=file.map(item=>{
+   if(!item.part||!item.ic||!item.model)throw Error('補填資料缺少料號、IC 或機種，請重新套用結果。');
+   const previous=(current.manual_corrections||[]).find(row=>!row.order&&row.part===item.part);
+   const saved={order:'',part:item.part,ic:item.ic,model:item.model};
+   if(item.override||previous?.override)Object.assign(saved,{override:true,family:item.override?item.family||'':previous.family||''});
+   return saved;
+  });
   const py=await initialize(),path='/app/data/corrections.sqlite3';
   py.FS.writeFile(path,state?.database?new Uint8Array(state.database):await get('autoreport.sqlite3'));
-  let database;
+  let database,corrections;
   try{
-   py.globals.set('correction_payload',JSON.stringify(corrections));
-   await py.runPythonAsync("import json; update_database.save_corrections('/app/data/corrections.sqlite3', json.loads(correction_payload))");
+   py.globals.set('correction_payload',JSON.stringify(updates));
+   corrections=JSON.parse(await py.runPythonAsync("import json; json.dumps(update_database.save_corrections('/app/data/corrections.sqlite3', json.loads(correction_payload)), ensure_ascii=False)"));
    database=py.FS.readFile(path).slice().buffer;
   }finally{py.FS.unlink(path);}
   const reference={...current,manual_corrections:corrections};

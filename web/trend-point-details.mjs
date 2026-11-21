@@ -36,7 +36,7 @@ export function renderTrendPointTable(host, trend, {startIndex=0, onPoint, onLin
      button.type = 'button';
      button.className = 'secondary';
      button.textContent = date.label;
-     button.title = '選取此日期的工單';
+     button.title = '選取此日期的料號';
      button.onclick = () => onPoint?.(index);
      cell.append(button);
      if (date.input != null) {

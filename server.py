@@ -33,8 +33,8 @@ class Handler(BaseHTTPRequestHandler):
                 if url.path == '/api/stats':
                     return self.respond(a.stats(db))
                 if url.path == '/api/query':
-                    kind = query.get('kind', ['any'])[0]
-                    if kind not in {'any', 'order', 'part', 'dpn', 'model', 'ic'}:
+                    kind = query.get('kind', ['part'])[0]
+                    if kind not in {'any', 'part'}:
                         raise ValueError('不支援的查找欄位。')
                     return self.respond(a.lookup(db, [(kind, query.get('q', [''])[0])]))
                 if url.path == '/api/search':

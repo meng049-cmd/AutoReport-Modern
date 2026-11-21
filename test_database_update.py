@@ -51,8 +51,8 @@ class DatabaseUpdateTests(unittest.TestCase):
         self.assertEqual(result['skipped_records'], 5)
         with a.connect(self.db) as db:
             self.assertEqual([tuple(r) for r in db.execute('SELECT * FROM records WHERE id<=5 ORDER BY id')], [tuple(r) for r in originals])
-            self.assertEqual(a.lookup(db, [('order', 'ORDER0')])['狀態'], '唯一匹配')
-            self.assertEqual(a.lookup(db, [('order', 'NEWORDER0')])['候選'][0]['機種'], 'New0')
+            self.assertEqual(a.lookup(db, [('part', 'PART0')])['狀態'], '唯一匹配')
+            self.assertEqual(a.lookup(db, [('part', 'NEWPART0')])['候選'][0]['機種'], 'New0')
             self.assertEqual(a.stats(db)['索引資料列'], 10)
         metadata_before = self.metadata.read_bytes()
         database_before = self.db.read_bytes()
@@ -74,16 +74,15 @@ class DatabaseUpdateTests(unittest.TestCase):
         legacy_digest = hashlib.sha256(payload + ('scope-v3-first-entry:' + scope).encode()).hexdigest()
         with a.connect(self.db) as db:
             db.execute('UPDATE sources SET sha256=?', (legacy_digest,))
-        update.save_corrections(self.db, [{'order': 'ORDER0', 'ic': 'Elan', 'model': 'New Model'}])
+        update.save_corrections(self.db, [{'part': 'PART0', 'ic': 'Elan', 'model': 'New Model'}])
         self.excel.write_bytes(payload)
         result = update.append_excel(self.db, self.excel, self.metadata)
         self.assertEqual(result['added_records'], 1)
         self.assertEqual(result['skipped_records'], 4)
         with a.connect(self.db) as db:
             for order in ('ORDER0', 'ALIAS0'):
-                match = a.lookup(db, [('order', order)])
-                self.assertEqual(match['狀態'], '唯一匹配')
-                self.assertEqual(match['候選'][0]['機種'], 'Model0')
+                self.assertTrue(db.execute('SELECT 1 FROM work_orders WHERE order_number=?', (order,)).fetchone())
+                self.assertEqual(a.lookup(db, [('order', order)])['狀態'], '缺少查找欄位')
             self.assertEqual(update.confirmed_corrections(db)[0]['model'], 'New Model')
         self.assertTrue(update.append_excel(self.db, self.excel, self.metadata)['unchanged'])
 
@@ -102,7 +101,7 @@ class DatabaseUpdateTests(unittest.TestCase):
         with a.connect(self.db) as db, patch.object(a, 'order_numbers', side_effect=prior_parser):
             imported = a.import_excel(db, payload, 'original.xlsx')
             db.execute('UPDATE sources SET sha256=? WHERE id=?', (prior_digest, imported['source_id']))
-            self.assertEqual(a.lookup(db, [('order', 'C520-260100002')])['狀態'], '查無資料')
+            self.assertFalse(db.execute("SELECT 1 FROM work_orders WHERE order_number='C520-260100002'").fetchone())
 
         self.excel.write_bytes(payload)
         result = update.append_excel(self.db, self.excel, self.metadata)
@@ -110,9 +109,8 @@ class DatabaseUpdateTests(unittest.TestCase):
         self.assertEqual(result['skipped_records'], 4)
         with a.connect(self.db) as db:
             for order in ('C520-251200017', 'C520-260100002'):
-                match = a.lookup(db, [('order', order)])
-                self.assertEqual(match['狀態'], '唯一匹配')
-                self.assertEqual(match['候選'][0]['機種'], 'Model0')
+                self.assertTrue(db.execute('SELECT 1 FROM work_orders WHERE order_number=?', (order,)).fetchone())
+                self.assertEqual(a.lookup(db, [('order', order)])['狀態'], '缺少查找欄位')
         self.assertTrue(update.append_excel(self.db, self.excel, self.metadata)['unchanged'])
 
     def test_invalid_or_missing_sheets_leave_database_intact(self):
@@ -137,7 +135,7 @@ class DatabaseUpdateTests(unittest.TestCase):
         self.assertEqual(result['added_records'], 1)
         self.assertEqual(result['skipped_records'], 9)
         with a.connect(self.db) as db:
-            actual = a.lookup(db, [('order', 'ORDER0')])
+            actual = a.lookup(db, [('part', 'PART0')])
             self.assertEqual(actual['狀態'], '多組候選')
             self.assertEqual({r['IC'] for r in actual['候選']}, {'Goodix', 'Synaptics'})
 

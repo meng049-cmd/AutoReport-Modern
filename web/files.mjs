@@ -4,7 +4,7 @@ import XLSX from '../vendor/xlsx.full.min.js';
 import '../merge-core.js';
 import {MAX_BYTES,MAX_ROWS,MAX_COLUMNS} from './limits.mjs';
 export {MAX_BYTES} from './limits.mjs';
-import {correctionPart,text,role,matchTables} from './matcher.mjs';
+import {text,role,matchTables} from './matcher.mjs';
 import {matchCorrectionIdentity} from './match-corrections.mjs';
 
 function csvRows(s){
@@ -63,19 +63,18 @@ export async function matchFile(matcher,bytes,filename,{analysisOnly=false,force
   for(let i=1;i<detail.raw.length;i++){
     const row=detail.raw[i]||[];if(!row.slice(0,9).some(Boolean))continue;
     if(row.slice(9,11).some(Boolean)||detail.existingMatchRows?.has(i))throw Error(`Detail 第 ${i+1} 列 J/K 已有資料，請先確認，避免覆蓋。`);
-    const [,order,part]=detail.expanded[i];
-    const criteria=[['order',order],['part',part]].filter(([,v])=>v);
+    const part=detail.expanded[i][2];
+    const criteria=part?[['part',part]]:[];
     const key=JSON.stringify(criteria);if(!lookups.has(key))lookups.set(key,matcher.lookup(criteria));const match=lookups.get(key),unique=match['狀態']==='唯一匹配'?match['候選'][0]:{};
     const original=detail.nativeRows.get(i);if(original){original[0]=globalThis.canonicalAnalysisProcess(original[0]);for(const c of [1,2])if(original[c]==null||original[c]==='')original[c]=detail.expanded[i][c]||null;}
     const resultRow={...(original?{compactValues:original}:{}),'分頁':'Detail','列號':i+1,'原始資料':row.slice(0,9),'機種':unique['機種']||'',IC:unique.IC||'',...match};
-    if(part)Object.defineProperty(resultRow,correctionPart,{value:part});
     if(match['狀態']==='唯一匹配'&&forcedCorrections.has(matchCorrectionIdentity({檔名:filename},resultRow).key)){
       resultRow['原比對狀態']=resultRow['狀態'];resultRow['狀態']='PPID對照衝突';resultRow.IC='';resultRow['機種']='';
     }
     results.push(resultRow);
   }
-  const exportHint=analysisOnly?'只保留六個分析製程與 A–K 必要欄位，原始檔完整保留於 Raw Data 檔案庫。':'下載保留原檔，J 為 IC、K 為機種。未唯一匹配的 J/K 留白。';
-  return {'檔名':filename,'筆數':results.length,'提示':['Detail 優先比對 B 欄工單，工單空白時使用 C 欄料號。'+exportHint],'結果':results,...(analysisOnly?{compactDetail:true,excludedRows:detail.excludedRows}:{detailBytes:bytes})};
+  const exportHint=analysisOnly?'依 C 欄料號比對，只保留六個分析製程與 A–K 必要欄位，原始檔完整保留於 Raw Data 檔案庫。':'下載保留原檔，J 為 IC、K 為機種。未唯一匹配的 J/K 留白。';
+  return {'檔名':filename,'筆數':results.length,'提示':['Detail 依 C 欄料號比對 IC／機種。'+exportHint],'結果':results,...(analysisOnly?{compactDetail:true,excludedRows:detail.excludedRows}:{detailBytes:bytes})};
 }
 function exportAnalysisDetail(result){const rows=[['製程','工單','料號','品名規格','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種']];for(const r of result['結果'])rows.push([...r.compactValues,r.IC||'',r['機種']||'']);const book=XLSX.utils.book_new(),sheet=XLSX.utils.aoa_to_sheet(rows,{dense:true});for(let i=1;i<rows.length;i++)if(sheet[i]?.[5])sheet[i][5].z='yyyy-mm-dd hh:mm:ss';XLSX.utils.book_append_sheet(book,sheet,'Detail');book.Custprops={AutoReportSources:JSON.stringify([result['檔名']]).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0')),AutoReportDetailPolicy:'six-processes-v1'};return new Uint8Array(XLSX.write(book,{type:'array',bookType:'xlsx',compression:true}));}
 export async function exportMatches(result){

@@ -66,7 +66,7 @@ class LargeWorksheetTests(unittest.TestCase):
             db = a.connect(Path(tmp) / 'large.sqlite3')
             try:
                 a.import_excel(db, stream.getvalue(), 'large.xlsx', ['大型對照'])
-                self.assertEqual(a.lookup(db, [('order', 'ORDER2')])['候選'][0]['機種'], 'LastModel')
+                self.assertEqual(a.lookup(db, [('part', 'PART2')])['候選'][0]['機種'], 'LastModel')
                 self.assertEqual(a.stats(db)['索引資料列'], 2)
             finally:
                 db.close()
@@ -95,13 +95,13 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(a.role('機型'), 'ic')
         self.assertEqual(a.role('机型'), 'ic')
         self.assertEqual(a.role('工單號碼'), 'order')
-        for value in ('繁體測試機種', '繁体测试机种'):
-            r = a.lookup(self.db, [('model', value), ('ic', 'ＧＯＯＤＩＸ')])
+        for value in ('98000001-107', '９８０００００１－１０７'):
+            r = a.lookup(self.db, [('part', value)])
             self.assertEqual(r['狀態'], '唯一匹配')
             self.assertEqual(r['候選'][0]['IC'], 'Goodix')
 
-    def test_order_link_and_revision_preserved(self):
-        r = a.lookup(self.db, [('order', 'link001')])
+    def test_secondary_part_link_and_revision_preserved(self):
+        r = a.lookup(self.db, [('part', '95000001-107')])
         self.assertEqual(r['狀態'], '唯一匹配')
         self.assertEqual(r['候選'][0]['機種'], '繁體測試機種')
         self.assertEqual(r['查找依據'][0]['分頁'], '工單連結')
@@ -111,25 +111,27 @@ class DatabaseTests(unittest.TestCase):
         r = a.lookup(self.db, [('part', 'SHARED')])
         self.assertEqual(r['狀態'], '多組候選')
         self.assertEqual(len(r['候選']), 2)
-        r = a.lookup(self.db, [('order', 'ORDER001'), ('ic', 'FPC')])
-        self.assertEqual(r['狀態'], '條件不一致')
-        self.assertFalse(r['候選'])
+        r = a.lookup(self.db, [('part', 'SHARED'), ('order', 'ORDER001'), ('ic', 'FPC')])
+        self.assertEqual(r['狀態'], '多組候選')
+        self.assertEqual(len(r['候選']), 2)
+        self.assertEqual(a.lookup(self.db, [('part', 'SHARED'), ('part', '98000002-107')])['候選'][0]['IC'], 'FPC')
+        self.assertEqual(a.lookup(self.db, [('part', 'SHARED'), ('part', 'UNKNOWN-IC')])['狀態'], '條件不一致')
 
     def test_merged_identifiers_and_raw_preserved(self):
-        r = a.lookup(self.db, [('order', 'MERGED002')])
+        r = a.lookup(self.db, [('part', 'MERGED')])
         self.assertEqual(r['候選'][0]['機種'], '合併機種')
         self.assertEqual(r['候選'][0]['IC'], 'Elan')
         self.assertEqual(self.db.execute('SELECT cells_json FROM raw_rows WHERE sheet_id=3 AND row_number=3').fetchone()[0],
                          '["", "", "", "MERGED002"]')
 
     def test_model_platform_separate_and_missing_ic(self):
-        r = a.lookup(self.db, [('model', 'A16')])
+        r = a.lookup(self.db, [('part', 'FAMILY-PART')])
         self.assertEqual(r['候選'][0]['機種'], 'Taroko 14')
         self.assertEqual(r['候選'][0]['產品系列'], ['A16'])
         self.assertEqual(a.lookup(self.db, [('part', 'UNKNOWN-IC')])['狀態'], '來源未提供完整對應')
 
     def test_csv_upload_and_excel_export_are_functional(self):
-        data = '工单号码,产品料号,机种,机型\nORDER001,,,\n,SHARED,,\n,NO-SUCH-PART,,\n'.encode('utf-8-sig')
+        data = '工单号码,产品料号,机种,机型\nORDER002,98000001-107,,\n,SHARED,,\n,NO-SUCH-PART,,\n'.encode('utf-8-sig')
         result = a.match_upload(self.db, data, 'upload.csv')
         self.assertEqual([r['狀態'] for r in result['結果']], ['唯一匹配', '多組候選', '查無資料'])
         self.assertEqual(result['結果'][0]['機種'], '繁體測試機種')
@@ -141,11 +143,17 @@ class DatabaseTests(unittest.TestCase):
     def test_xlsx_upload_with_simplified_headers(self):
         book = Workbook()
         book.active.append(['工单号', '料号', '机种', '机型'])
-        book.active.append(['ORDER001', '', '', ''])
+        book.active.append(['ORDER002', '98000001-107', '', ''])
         buf = io.BytesIO()
         book.save(buf)
         result = a.match_upload(self.db, buf.getvalue(), 'request.xlsx')
         self.assertEqual(result['結果'][0]['IC'], 'Goodix')
+
+    def test_order_and_customer_part_headers_do_not_start_a_part_lookup(self):
+        data = '工單號,客戶料號\nORDER001,98000001-107\n'.encode()
+        result = a.match_upload(self.db, data, 'query.csv')
+        self.assertEqual(result['結果'], [])
+        self.assertEqual(result['提示'], ['「query」沒有可辨識的查找欄位；請使用料號或查詢值。'])
 
     def test_excel_formula_injection_exported_as_text(self):
         result = a.match_upload(self.db, '查询值\n=HYPERLINK("evil")\n'.encode(), 'formula.csv')
@@ -153,7 +161,9 @@ class DatabaseTests(unittest.TestCase):
         self.assertFalse(any(c.data_type == 'f' for row in book.active for c in row))
 
     def test_literal_search_and_no_sql_injection(self):
-        self.assertTrue(a.search(self.db, '繁体测试'))
+        self.assertTrue(a.search(self.db, '９８０００００１－１０７'))
+        self.assertFalse(a.search(self.db, 'ORDER001'))
+        self.assertFalse(a.search(self.db, '98000001'))
         self.assertFalse(a.search(self.db, "%'; DROP TABLE records;--"))
         self.assertFalse(a.search(self.db, '%'))
         self.assertTrue(a.stats(self.db)['索引資料列'])
@@ -184,7 +194,7 @@ class DatabaseTests(unittest.TestCase):
             a.import_excel(self.db, self.payload, 'missing.xlsx')
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM sources').fetchone()[0], before)
 
-    def test_all_work_orders_are_indexed_with_sap_and_formatting_removed(self):
+    def test_work_orders_are_retained_as_source_provenance(self):
         orders = ['C520-260600014', 'C520-260700009', 'C520-626070046']
         combined = '~~C520-260600014~~<br> Ｃ５２０−２６０７００００９\nSAP:C520-626070046'
         self.assertEqual(a.order_numbers(combined), orders)
@@ -202,23 +212,21 @@ class DatabaseTests(unittest.TestCase):
         book.save(payload)
         a.import_excel(self.db, payload.getvalue(), 'multi.xlsx', ['訂單'])
         for order in orders:
-            self.assertEqual(a.lookup(self.db, [('order', order)])['候選'][0]['機種'], '多工單')
-        result = a.lookup(self.db, [('order', combined)])
+            self.assertEqual(a.lookup(self.db, [('order', order)])['狀態'], '缺少查找欄位')
+        result = a.lookup(self.db, [('part', '98000200-101')])
         self.assertEqual(result['狀態'], '唯一匹配')
-        self.assertEqual(result['查找條件'][0]['查找值'], '\n'.join(orders))
+        self.assertEqual(result['查找條件'][0]['查找值'], '98000200-101')
+        self.assertEqual(a.search(self.db, '98000200-101')[0]['orders'], orders)
         self.assertEqual(len(result['查找依據']), 1)
 
-    def test_work_orders_in_one_query_cell_are_alternatives(self):
-        result = a.match_upload(self.db, b'Work Order\n"WO999\nSAP:ORDER001"\n', 'multi.csv')
+    def test_legacy_query_value_is_an_exact_part_only(self):
+        result = a.match_upload(self.db, '查詢值\n98000001-107\nORDER001\n'.encode(), 'multi.csv')
         self.assertEqual(result['結果'][0]['狀態'], '唯一匹配')
         self.assertEqual(result['結果'][0]['IC'], 'Goodix')
-        orders = ('order', 'ORDER001\nORDER002')
-        result = a.lookup(self.db, [orders])
-        self.assertEqual(result['狀態'], '多組候選')
-        self.assertEqual(len(result['查找依據']), 2)
-        result = a.lookup(self.db, [orders, ('ic', 'FPC')])
-        self.assertEqual(result['狀態'], '唯一匹配')
-        self.assertEqual(result['候選'][0]['IC'], 'FPC')
+        self.assertEqual(result['結果'][1]['狀態'], '查無資料')
+        self.assertEqual(result['結果'][0]['查找條件'][0]['欄位類別'], 'part')
+        result = a.lookup(self.db, [('any', '98000002-107'), ('part', '98000001-107')])
+        self.assertEqual(result['候選'][0]['IC'], 'Goodix')
 
     def test_work_orders_keep_struck_text_and_decode_numeric_entities(self):
         first = '~~C520-251200018~~<br>~~&#32;   &#32;~~&#x43;520-260100004'
@@ -238,19 +246,13 @@ class DatabaseTests(unittest.TestCase):
         payload = io.BytesIO()
         book.save(payload)
         a.import_excel(self.db, payload.getvalue(), 'decorated.xlsx', ['訂單'])
-        for value in ('C520-251200018', 'C520-260100004', first):
-            result = a.lookup(self.db, [('order', value)])
-            self.assertEqual(result['狀態'], '唯一匹配')
-            self.assertEqual(result['候選'][0]['IC'], 'Goodix')
-        for value in ('~~C520-251200017~~', 'C520-260100002', second):
-            result = a.lookup(self.db, [('order', value)])
-            self.assertEqual(result['狀態'], '唯一匹配')
-            self.assertEqual(result['候選'][0]['IC'], 'Elan')
+        self.assertEqual(a.lookup(self.db, [('order', first)])['狀態'], '缺少查找欄位')
+        self.assertEqual(a.lookup(self.db, [('any', second)])['狀態'], '查無資料')
         raw = self.db.execute("SELECT cells_json FROM raw_rows JOIN sheets ON sheet_id=sheets.id "
                               "WHERE sheets.name='訂單' AND row_number=2").fetchone()
         self.assertEqual(json.loads(raw['cells_json'])[0], first)
 
-    def test_explicit_order_matches_even_with_an_unrelated_part_number(self):
+    def test_explicit_part_matches_even_with_an_unrelated_order(self):
         book = Workbook()
         book.active.title = '訂單'
         book.active.append(['工單號', '機型', '機種', '成品料號', '分段式料號'])
@@ -260,12 +262,11 @@ class DatabaseTests(unittest.TestCase):
         a.import_excel(self.db, payload.getvalue(), 'order.xlsx', ['訂單'])
         result = a.lookup(self.db, [('order', 'C520-260100006'), ('part', '98000002-107')])
         self.assertEqual(result['狀態'], '唯一匹配')
-        self.assertEqual(result['候選'][0]['機種'], 'Taroko 14')
-        self.assertEqual(result['候選'][0]['IC'], 'Goodix')
-        self.assertEqual([criterion['欄位類別'] for criterion in result['查找條件']], ['order'])
+        self.assertEqual(result['候選'][0]['IC'], 'FPC')
+        self.assertEqual([criterion['欄位類別'] for criterion in result['查找條件']], ['part'])
         self.assertEqual(a.lookup(self.db, [('part', '95000510-101')])['候選'][0]['機種'], 'Taroko 14')
         self.assertEqual(a.lookup(self.db, [('order', ''), ('part', '98000002-107')])['候選'][0]['IC'], 'FPC')
-        self.assertEqual(a.lookup(self.db, [('order', 'UNKNOWN1'), ('part', '95000510-101')])['狀態'], '查無資料')
+        self.assertEqual(a.lookup(self.db, [('order', 'UNKNOWN1'), ('part', '95000510-101')])['狀態'], '唯一匹配')
 
     def test_first_entry_for_model_ic_and_part_keeps_slash_in_name(self):
         book = Workbook()
@@ -276,12 +277,12 @@ class DatabaseTests(unittest.TestCase):
         buf = io.BytesIO()
         book.save(buf)
         a.import_excel(self.db, buf.getvalue(), 'first.xlsx', ['第一筆'])
-        result = a.lookup(self.db, [('order', 'C515-260100001')])
+        result = a.lookup(self.db, [('part', '98000398-103')])
         self.assertEqual(result['候選'][0]['IC'], 'Goodix')
         self.assertEqual(result['候選'][0]['機種'], 'Slate/Congo 14')
-        self.assertEqual(a.lookup(self.db, [('order', 'C515-260100002')])['候選'][0]['機種'], 'Slate/Congo 14')
+        self.assertEqual(a.search(self.db, '98000398-103')[0]['orders'], ['C515-260100001', 'C515-260100002'])
         self.assertEqual(a.lookup(self.db, [('part', '98000412-103')])['狀態'], '查無資料')
-        self.assertEqual(a.lookup(self.db, [('dpn', 'PCC61')])['狀態'], '查無資料')
+        self.assertEqual(a.lookup(self.db, [('dpn', 'PCC61')])['狀態'], '缺少查找欄位')
 
     def test_rework_label_resolves_ic_using_exact_part_and_swapped_dpn(self):
         book = Workbook()
@@ -294,13 +295,13 @@ class DatabaseTests(unittest.TestCase):
         buf = io.BytesIO()
         book.save(buf)
         a.import_excel(self.db, buf.getvalue(), 'rework.xlsx', ['標準', '重工'])
-        for order in ['C630-626080041', 'C523-260800002']:
-            result = a.lookup(self.db, [('order', order)])
-            self.assertEqual(result['候選'][0]['IC'], 'Goodix')
-            self.assertEqual(result['候選'][0]['來源'][0]['原始IC／機型'], '不良品返修')
-        result = a.lookup(self.db, [('order', 'C515-260100001')])
+        result = a.lookup(self.db, [('part', '95000331-102')])
         self.assertEqual(result['候選'][0]['IC'], 'Goodix')
-        self.assertEqual(result['候選'][0]['產品系列'], ['CY26'])
+        self.assertEqual(result['候選'][0]['來源'][0]['原始IC／機型'], '不良品返修')
+        result = a.lookup(self.db, [('part', '98000398-103')])
+        self.assertEqual(result['狀態'], '多組候選')
+        self.assertEqual({group['機種'] for group in result['候選']}, {'CY26', 'CY26-14'})
+        self.assertEqual(next(group for group in result['候選'] if group['機種'] == 'CY26-14')['產品系列'], ['CY26'])
 
     def test_rework_without_reference_remains_incomplete(self):
         book = Workbook()
@@ -310,7 +311,7 @@ class DatabaseTests(unittest.TestCase):
         buf = io.BytesIO()
         book.save(buf)
         a.import_excel(self.db, buf.getvalue(), 'unresolved.xlsx', ['重工'])
-        result = a.lookup(self.db, [('order', 'C630-626080999')])
+        result = a.lookup(self.db, [('part', '98000999-101')])
         self.assertEqual(result['狀態'], '來源未提供完整對應')
         self.assertEqual(result['候選'][0]['IC'], '')
 
@@ -326,19 +327,20 @@ class DatabaseTests(unittest.TestCase):
         buf = io.BytesIO()
         book.save(buf)
         a.import_excel(self.db, buf.getvalue(), 'conflict.xlsx', ['參考', '重工'])
-        r = a.lookup(self.db, [('order', 'C630-626080043')])
-        self.assertEqual(r['狀態'], '來源未提供完整對應')
-        self.assertEqual(r['候選'][0]['IC'], '')
+        r = a.lookup(self.db, [('part', '98000412-103')])
+        self.assertEqual(r['狀態'], '多組候選')
+        self.assertEqual({candidate['IC'] for candidate in r['候選']}, {'Goodix', 'Synaptics'})
+        self.assertEqual(self.db.execute("SELECT ic FROM records WHERE raw_ic='不良品返修'").fetchone()[0], '')
 
-    def test_work_order_with_missing_model_is_incomplete_not_absent(self):
+    def test_part_with_missing_model_is_incomplete_not_absent(self):
         book = Workbook()
         book.active.title = '缺機種'
-        book.active.append(['工單號', 'IC', '機種'])
-        book.active.append(['C510-260500009', 'Elan', ''])
+        book.active.append(['工單號', 'IC', '機種', '料號'])
+        book.active.append(['C510-260500009', 'Elan', '', '98000199-101'])
         buf = io.BytesIO()
         book.save(buf)
         a.import_excel(self.db, buf.getvalue(), 'partial.xlsx', ['缺機種'])
-        r = a.lookup(self.db, [('order', 'C510-260500009')])
+        r = a.lookup(self.db, [('part', '98000199-101')])
         self.assertEqual(r['狀態'], '來源未提供完整對應')
         self.assertEqual(r['候選'][0]['IC'], 'Elan')
 

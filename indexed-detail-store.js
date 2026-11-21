@@ -3,7 +3,7 @@
 let opening;
 function open(){return opening||(opening=new Promise((resolve,reject)=>{
  if(!root.indexedDB){reject(Error('瀏覽器無法使用日期索引，請使用允許本機儲存的 Chrome／Edge。'));return;}
- const request=root.indexedDB.open('AutoReport-detail-index',1);
+ const request=root.indexedDB.open('AutoReport-Part-detail-index',1);
  request.onupgradeneeded=()=>{request.result.createObjectStore('files',{keyPath:'key'});request.result.createObjectStore('rows',{keyPath:['source','day','seq']});};
  request.onsuccess=()=>{const db=request.result;db.onversionchange=()=>{db.close();opening=null;};resolve(db);};request.onerror=()=>{opening=null;reject(request.error);};
 }));}

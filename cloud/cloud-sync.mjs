@@ -2,6 +2,7 @@ import config from './cloud-config.js';
 
 const MAX_BYTES = 50 * 1024 * 1024;
 const APPS = {
+  'autoreport-part': {databases: {'AutoReport-Part-local-database': {version: 2, stores: {state: {}}}, 'AutoReport-Part-file-library': {version: 1, stores: {files: {keyPath: 'id'}}}}, local: () => false},
   autoreport: {databases: {'AutoReport-local-database': {version: 2, stores: {state: {}}}, 'AutoReport-file-library': {version: 1, stores: {files: {keyPath: 'id'}}}}, local: () => false},
   twstocksearch: {databases: {'TWStockSearch-research': {version: 1, stores: {workspace: {}}}}, local: key => key === 'twstocksearch-theme' || key === 'twstocksearch-research-v1' || key.startsWith('turning-note-')}
 };
@@ -83,9 +84,9 @@ export function validateSnapshot(snapshot, app) {
   if (Object.entries(snapshot.local).some(([key, value]) => !schema.local(key) || typeof value !== 'string')) throw Error('備份含無效的網站設定。');
   return snapshot;
 }
-async function clearAnalysisCache() {
+async function clearAnalysisCache(app) {
   await new Promise((resolve, reject) => {
-    const request = indexedDB.open('AutoReport-analysis-cache'); let absent = false;
+    const request = indexedDB.open(app === 'autoreport-part' ? 'AutoReport-Part-analysis-cache' : 'AutoReport-analysis-cache'); let absent = false;
     request.onupgradeneeded = () => {absent = true; request.transaction.abort();};
     request.onerror = () => absent ? resolve() : reject(request.error);
     request.onsuccess = () => {
@@ -106,7 +107,7 @@ export async function restore(snapshot, app) {
     for (const key of keys) localStorage.removeItem(key);
     for (const [key, item] of Object.entries(value.local)) localStorage.setItem(key, item);
   }
-  try {await apply(snapshot); if (app === 'autoreport') await clearAnalysisCache();} catch (error) {try {await apply(previous);} catch {throw Error('還原失敗且無法完整復原，請保留下載的本機備份，勿重新整理。');} throw error;}
+  try {await apply(snapshot); if (app === 'autoreport' || app === 'autoreport-part') await clearAnalysisCache(app);} catch (error) {try {await apply(previous);} catch {throw Error('還原失敗且無法完整復原，請保留下載的本機備份，勿重新整理。');} throw error;}
 }
 
 export class CloudClient {
@@ -185,6 +186,31 @@ function mount() {
   const ownerKey='autoreport-local-owner';
   function bootstrap(allowed){if(!app)return;document.body.classList.toggle('analysis-is-locked',!allowed);app.hidden=!allowed;app.inert=!allowed;if(allowed&&!appStarted){appStarted=true;const entry=document.getElementById('analysis-entry');if(entry){const script=document.createElement('script');script.type='module';script.src=JSON.parse(entry.textContent).src;document.body.append(script);}}}
   bootstrap(!gateRequired);
+  if(config.localOnly){
+    panel.innerHTML='<summary>本機備份</summary><button type="button">下載料號版本機備份</button> <label>還原料號版備份 <input type="file" accept="application/json,.json"></label><p role="status" aria-live="polite"></p>';
+    const status=panel.querySelector('[role=status]');
+    const download=panel.querySelector('button'), input=panel.querySelector('input');
+    async function localAction(action){
+      download.disabled=input.disabled=true;
+      try{await action();}catch(error){status.textContent=error.message;}
+      finally{download.disabled=input.disabled=false;input.value='';}
+    }
+    download.onclick=()=>localAction(async()=>{
+      await saveBackup(await capture(config.app),config.app);
+      status.textContent='本機備份已下載。';
+    });
+    input.onchange=()=>localAction(async()=>{
+      const file=input.files[0];
+      if(!file)return;
+      if(file.size>MAX_BYTES)throw Error('備份檔超過 50 MB。');
+      const snapshot=validateSnapshot(decode(JSON.parse(await file.text())),config.app);
+      await saveBackup(await capture(config.app),config.app);
+      if(!confirm('已下載目前資料的備份。確定要還原並取代此料號版的本機資料？'))return;
+      await restore(snapshot,config.app);
+      location.reload();
+    });
+    return;
+  }
   const switchAccount=document.createElement('button');switchAccount.type='button';switchAccount.textContent='切換帳號並清除本機副本';switchAccount.hidden=true;panel.append(switchAccount);
   const logoutButton=panel.querySelector('[data-action=logout]');panel.append(logoutButton);logoutButton.hidden=true;
   async function verifySession(){verified=false;const user=await client.verifiedUser();verified=true;clearTimeout(expirationTimer);expirationTimer=setTimeout(()=>{verified=false;render();show('登入已到期，請重新登入後使用分析。');},Math.max(0,client.session.expires_at*1000-Date.now()));if(!localStorage.getItem(ownerKey))localStorage.setItem(ownerKey,user.id);}

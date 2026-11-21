@@ -9,7 +9,7 @@ export function beginFileOperation(){if(operationBusy)return false;operationBusy
 export function endFileOperation(){operationBusy=false;changed('busy');}
 export const libraryReady=new Promise(resolve=>{
  if(!globalThis.indexedDB){resolve();return;}
- const request=indexedDB.open('AutoReport-file-library',1);
+ const request=indexedDB.open('AutoReport-Part-file-library',1);
  request.onupgradeneeded=()=>request.result.createObjectStore('files',{keyPath:'id'});
  request.onerror=()=>resolve();request.onsuccess=()=>{db=request.result;db.onversionchange=()=>{db.close();db=null;};const read=db.transaction('files').objectStore('files').getAll();read.onsuccess=()=>{for(const item of read.result)entries.set(item.id,item);resolve();};read.onerror=()=>resolve();};
 });

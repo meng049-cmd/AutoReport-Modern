@@ -97,14 +97,14 @@ def save_corrections(database, corrections):
         raise ValueError('請先套用補填結果。')
     updates = {}
     for item in corrections:
-        order, part = a.norm(item.get('order', '')), a.norm(item.get('part', ''))
+        part = a.norm(a.first_text(item.get('part', '')))
         ic, model = str(item.get('ic', '')).strip(), str(item.get('model', '')).strip()
-        if not order or not ic or not model:
-            raise ValueError('保存補填必須提供工單、IC 與機種。')
-        key = json.dumps([order, part], ensure_ascii=False)
+        if not part or not ic or not model:
+            raise ValueError('保存補填必須提供料號、IC 與機種。')
+        key = json.dumps(['', part], ensure_ascii=False)
         if key in updates and (updates[key]['ic'], updates[key]['model']) != (ic, model):
-            raise ValueError('同一工單／料號存在不同補填值。')
-        updates[key] = dict(order=order, part=part, ic=ic, model=model,
+            raise ValueError('同一料號存在不同補填值。')
+        updates[key] = dict(order='', part=part, ic=ic, model=model,
                             confirmed_at=datetime.now(timezone.utc).isoformat())
         if item.get('override'):
             updates[key].update(override=True, family=str(item.get('family', '')).strip())

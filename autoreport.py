@@ -1,4 +1,4 @@
-"""Resolve work orders to IC/model from the five explicitly selected source tabs."""
+"""Resolve part numbers to IC/model from the five explicitly selected source tabs."""
 from __future__ import annotations
 
 import argparse
@@ -83,10 +83,9 @@ def split_values(value):
     return [value] if available(value) else []
 
 
-def primary_identifiers(record):
+def primary_parts(record):
     parts = json.loads(record['parts_json'])
-    anchors = [p for p in parts if p.startswith('98')] or [p for p in parts if p.startswith('95')] or parts
-    return [('part', p) for p in anchors] + [('dpn', p) for p in json.loads(record['dpns_json'])]
+    return [p for p in parts if p.startswith('98')] or [p for p in parts if p.startswith('95')] or parts
 
 
 def ic_details(raw_ic):
@@ -193,10 +192,12 @@ def excel_sheets(payload, sheet_names=None):
     return output
 
 
-def find_header(rows):
+def find_header(rows, allowed_roles=None):
     best = None
     for i, row in enumerate(rows[:50]):
         roles = [role(v) for v in row]
+        if allowed_roles is not None:
+            roles = [value if value in allowed_roles else None for value in roles]
         score = sum(r is not None for r in roles)
         if score and (best is None or score > best[0]):
             best = (score, i, row, roles)
@@ -365,13 +366,12 @@ def reconcile_missing_ic(db, source_id):
                             "WHERE s.source_id=? AND r.ic=''", (source_id,)).fetchall()
     for record in unresolved:
         # Finished-product identifiers take precedence over shared component identifiers.
-        identifiers = primary_identifiers(record)
         references = {}
-        for kind, value in identifiers:
+        for part in primary_parts(record):
             for reference in db.execute('''SELECT other.id,other.ic,other.model,other.raw_ic FROM lookup_keys k
                 JOIN records other ON other.id=k.record_id JOIN sheets s ON s.id=other.sheet_id
-                WHERE k.kind=? AND k.value=? AND other.ic<>'' AND s.source_id=?''',
-                                       (kind, norm(value), source_id)):
+                WHERE k.kind='part' AND k.value=? AND other.ic<>'' AND s.source_id=?''',
+                                       (norm(part), source_id)):
                 if not ic_details(reference['raw_ic'])[0]:
                     continue
                 if a_model := reference['model']:
@@ -383,7 +383,7 @@ def reconcile_missing_ic(db, source_id):
         notes = json.loads(record['resolution_json'])
         if len(brands) == 1:
             ic = next(iter(brands.values()))
-            notes.append('以相同主料號／DPN 跨頁確認 IC：' + ic)
+            notes.append('以相同主料號跨頁確認 IC：' + ic)
             notes.append({'IC依據資料列ID': sorted(references)})
             db.execute('UPDATE records SET ic=?,resolution_json=?,search_text=search_text||? WHERE id=?',
                        (ic, json.dumps(notes, ensure_ascii=False), norm(ic), record['id']))
@@ -391,7 +391,7 @@ def reconcile_missing_ic(db, source_id):
             models = {norm(r['model']): r['model'] for r in references.values() if available(r['model'])}
             if not record['model'] and len(models) == 1:
                 model = next(iter(models.values()))
-                notes.append('以相同主料號／DPN 跨頁確認機種：' + model)
+                notes.append('以相同主料號跨頁確認機種：' + model)
                 db.execute('UPDATE records SET model=?,resolution_json=?,search_text=search_text||? WHERE id=?',
                            (model, json.dumps(notes, ensure_ascii=False), norm(model), record['id']))
                 db.execute('INSERT OR IGNORE INTO lookup_keys VALUES(?,?,?)', ('model', norm(model), record['id']))
@@ -420,58 +420,65 @@ def present(record):
     return r
 
 
-def direct_ids(db, kind, value):
-    if kind == 'any':
-        return {r[0] for r in db.execute('SELECT DISTINCT record_id FROM lookup_keys WHERE value=?', (norm(value),))}
-    return {r[0] for r in db.execute('SELECT record_id FROM lookup_keys WHERE kind=? AND value=?', (kind, norm(value)))}
+def part_ids(db, value):
+    return {r[0] for r in db.execute("SELECT record_id FROM lookup_keys WHERE kind='part' AND value=?",
+                                     (norm(value),))}
 
 
 def lookup(db, criteria):
-    """Intersect distinct model/IC pairs; never choose the first ambiguous hit.
-
-    An explicit work order takes precedence over a supplied part number.
-    Orders without model/IC may resolve through exact part/DPN relations.
-    Revision suffixes are preserved; fuzzy text search never auto-fills a result.
-    """
-    criteria = list(criteria)
-    has_order = any(kind == 'order' and norm(first_text(value)) for kind, value in criteria)
-    # Each order in one field is an alternative; separate fields remain constraints.
+    """Resolve exact part numbers, intersecting separate part columns."""
+    terms = [(kind, first_text(value)) for kind, value in criteria if kind in ('part', 'any')]
+    parts = [value for kind, value in terms if kind == 'part' and norm(value)]
+    if not parts:
+        parts = [value for kind, value in terms if kind == 'any' and norm(value)]
+    has_corrections = parts and db.execute(
+        "SELECT 1 FROM sqlite_master WHERE name='manual_match_corrections'").fetchone()
     sets, all_candidates, evidence, resolved_criteria = [], {}, {}, []
-    for kind, value in criteria:
-        if has_order and kind == 'part':
+
+    def add_candidate(key, model, ic, family, source):
+        pair = (norm(model), norm(ic))
+        candidate = all_candidates.setdefault(pair, {'機種': model, 'IC': ic, '產品系列': set(), '來源': {}})
+        if family:
+            candidate['產品系列'].add(family)
+        candidate['來源'][key] = source
+        return pair
+
+    for value in parts:
+        part = norm(value)
+        saved = db.execute('SELECT payload FROM manual_match_corrections WHERE key=?',
+                           (json.dumps(['', part], ensure_ascii=False),)).fetchone() if has_corrections else None
+        if saved:
+            correction = json.loads(saved[0])
+            source = {'檔案': '已確認補填對照', '分頁': '料號 IC／機種補填', '列號': 1,
+                      '整理依據': ['確認時間：' + correction['confirmed_at']]}
+            pair = add_candidate(part, correction['model'], correction['ic'], correction.get('family'), source)
+            sets.append({pair})
+            resolved_criteria.append({'欄位類別': 'part', '查找值': value, '找到候選組數': 1})
+            evidence[part] = source
             continue
-        numbers = order_numbers(value) if kind in ('order', 'any') else []
-        values = numbers or [first_text(value)]
-        if not norm(values[0]):
-            continue
-        ids = {record_id for item in values for record_id in direct_ids(db, kind, item)}
+        ids = part_ids(db, value)
         linked = set(ids)
         for record_id in ids:
             rec = db.execute('SELECT * FROM records WHERE id=?', (record_id,)).fetchone()
             if rec['model']:
                 continue
-            # Only identifiers in source rows lacking mappings can bridge to another row.
-            for key_kind, key_value in primary_identifiers(rec):
-                for other_id in direct_ids(db, key_kind, key_value):
+            for key_value in primary_parts(rec):
+                for other_id in part_ids(db, key_value):
                     other = db.execute('SELECT ic FROM records WHERE id=?', (other_id,)).fetchone()
                     if not rec['ic'] or norm(other['ic']) == norm(rec['ic']):
                         linked.add(other_id)
         pairs = set()
         for record_id in sorted(linked):
             rec = db.execute(RECORD_SQL + ' WHERE r.id=?', (record_id,)).fetchone()
-            pair = (norm(rec['model']), norm(rec['ic']))
-            pairs.add(pair)
-            all_candidates.setdefault(pair, {'機種': rec['model'], 'IC': rec['ic'], '產品系列': set(), '來源': {}})
-            if rec['family']:
-                all_candidates[pair]['產品系列'].add(rec['family'])
-            all_candidates[pair]['來源'][record_id] = {
+            source = {
                 '檔案': rec['source_file'], '分頁': rec['sheet'], '列號': rec['row_number'],
                 '原始IC／機型': rec['raw_ic'], '整理依據': json.loads(rec['resolution_json'])}
+            pairs.add(add_candidate(record_id, rec['model'], rec['ic'], rec['family'], source))
         # Records with IC should supersede incomplete mappings for the same identifier.
         if any(ic for _, ic in pairs):
             pairs = {p for p in pairs if p[1]}
         sets.append(pairs)
-        resolved_criteria.append({'欄位類別': kind, '查找值': '\n'.join(values), '找到候選組數': len(pairs)})
+        resolved_criteria.append({'欄位類別': 'part', '查找值': value, '找到候選組數': len(pairs)})
         for record_id in sorted(ids):
             rec = db.execute(RECORD_SQL + ' WHERE r.id=?', (record_id,)).fetchone()
             evidence[record_id] = {'檔案': rec['source_file'], '分頁': rec['sheet'], '列號': rec['row_number']}
@@ -496,9 +503,10 @@ def lookup(db, criteria):
 
 
 def search(db, query, limit=100):
-    q = norm(query).replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
-    rows = db.execute(RECORD_SQL + " WHERE r.search_text LIKE ? ESCAPE '\\' ORDER BY r.id LIMIT ?",
-                      ('%' + q + '%', min(max(int(limit), 1), 500))).fetchall()
+    rows = db.execute(RECORD_SQL + """
+        JOIN lookup_keys k ON k.record_id=r.id
+        WHERE k.kind='part' AND k.value=? ORDER BY r.id LIMIT ?
+        """, (norm(first_text(query)), min(max(int(limit), 1), 500))).fetchall()
     return [present(r) for r in rows]
 
 
@@ -506,6 +514,7 @@ def stats(db):
     return {'分頁': [dict(r) for r in db.execute('SELECT s.*,src.filename FROM sheets s '
                                                 'JOIN sources src ON src.id=s.source_id ORDER BY s.id')],
             '索引資料列': db.execute('SELECT COUNT(*) FROM records').fetchone()[0],
+            '不重複料號': db.execute("SELECT COUNT(DISTINCT value) FROM lookup_keys WHERE kind='part'").fetchone()[0],
             '不重複工單': db.execute('SELECT COUNT(DISTINCT normalized_order) FROM work_orders').fetchone()[0],
             '機種IC組合': db.execute("SELECT COUNT(*) FROM (SELECT DISTINCT model,ic FROM records WHERE model<>'' AND ic<>'')").fetchone()[0],
             'IC清單': [r[0] for r in db.execute("SELECT DISTINCT ic FROM records WHERE ic<>'' ORDER BY ic")]}
@@ -535,9 +544,9 @@ def input_tables(payload, filename):
 def match_upload(db, payload, filename):
     results, notices = [], []
     for name, raw, expanded in input_tables(payload, filename):
-        header = find_header(raw)
+        header = find_header(raw, allowed_roles={'part', 'any'})
         if not header:
-            notices.append(f'「{name}」沒有可辨識的查找欄位；請使用工單號、料號、DPN、機種、IC／機型或查詢值。')
+            notices.append(f'「{name}」沒有可辨識的查找欄位；請使用料號或查詢值。')
             continue
         _, offset, headers, roles = header
         for i in range(offset + 1, len(raw)):
@@ -585,7 +594,7 @@ def main():
                      help='明確指定來源分頁；預設採用圖一的五頁，繁簡名稱均可')
     qry = sub.add_parser('query')
     qry.add_argument('value')
-    qry.add_argument('--kind', choices=['any', 'order', 'part', 'dpn', 'model', 'ic'], default='any')
+    qry.add_argument('--kind', choices=['any', 'part'], default='part')
     sch = sub.add_parser('search')
     sch.add_argument('value')
     mat = sub.add_parser('match')

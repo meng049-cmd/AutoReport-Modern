@@ -138,7 +138,7 @@ function showResult(range,preserveFilters){
  $('weeklyTrendHelp').textContent=daily
   ?'每天獨立去重。有投入但該項無不良時顯示 0%。沒有來源投入的日期略過，無法計算的日期留空。'
   :'每個週點獨立去重。該製程有投入、該項無不良時顯示 0%；無投入或未完成的週留空。';
- $('weeklyTrendHelp').textContent+=' 點圖例或圓點可查看機種／IC，展開點位明細可查看工單。';
+ $('weeklyTrendHelp').textContent+=' 點圖例或圓點可查看機種／IC，展開點位明細可查看料號。';
  $('weeklyTrendExportError').hidden=true;
  if (!preserveFilters) hidden.clear();
  productPicker.setOptions([...products].sort((a,b) => a[1].localeCompare(b[1],'zh-Hant')), preserveFilters ? productPicker.selection : null);
@@ -383,7 +383,7 @@ function setupPointDetails() {
   const periods = results.filter((_,point) => line.points[point]?.input > 0);
   const orders = new Map();
   for (const [i,period] of periods.entries()) {
-   progress('正在讀取工單明細 '+(i+1)+'／'+periods.length+' · '+period.label);
+   progress('正在讀取料號明細 '+(i+1)+'／'+periods.length+' · '+period.label);
    const {orderRows} = await calculate(period.sourceJob,orderSkipInvalidRows,signal,scope);
    for (const row of orderRows) {
     if (!orders.has(row.order)) orders.set(row.order,{order:row.order,input:0,count:0});

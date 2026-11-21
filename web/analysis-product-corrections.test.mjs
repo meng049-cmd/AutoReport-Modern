@@ -7,7 +7,7 @@ import '../yield-core.js';
 import '../analysis-product-corrections.js';
 const {applyConfirmedProductCorrections}=globalThis;
 const header=['製程','工單','料號','品名規格','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種'];
-const correction={order:'wo123',part:'part1',ic:'Goodix',model:'Model A'};
+const correction={order:'',part:'part1',ic:'Goodix',model:'Model A'};
 function mergerFor(rows){
  const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([header,...rows]),'Detail');
  const merger=new globalThis.DetailMerger(XLSX);merger.add(book,'existing.xlsx');return merger;
@@ -26,24 +26,17 @@ test('confirmed corrections move pending PPIDs into the named daily stage produc
  assert.ok(!stageRows.flat().some(value=>/待補/.test(String(value))));
  assert.equal(applyConfirmedProductCorrections(merger,[correction]),0);
 });
-test('only exact order/part matches fill missing identities; complete and conflicting identities remain intact',()=>{
- const merger=mergerFor([row('partial','ｗｏ１２３','part1','Goodix'),row('other-part','WO123','PART2'),row('other-order','WO999'),row('blank-order',''),row('complete','WO123','PART1','Other','Other Model'),row('conflict','WO123','PART1','Other')]);
- assert.equal(applyConfirmedProductCorrections(merger,[correction]),1);
+test('the same part receives the correction across work orders while conflicting identities remain intact',()=>{
+ const merger=mergerFor([row('partial','WO123','ｐａｒｔ１','Goodix'),row('other-part','WO123','PART2'),row('other-order','WO999'),row('blank-order',''),row('blank-part','WO123',''),row('complete','WO123','PART1','Other','Other Model'),row('conflict','WO123','PART1','Other')]);
+ assert.equal(applyConfirmedProductCorrections(merger,[correction]),3);
  const rows=new Map([...merger.rows.values()].map(value=>[value.row[4],value.row]));
- assert.equal(rows.get('partial')[10],'Model A');
- for(const id of ['other-part','other-order','blank-order','conflict'])assert.equal(rows.get(id)[10],'');
+ for(const id of ['partial','other-order','blank-order'])assert.equal(rows.get(id)[10],'Model A');
+ for(const id of ['other-part','blank-part','conflict'])assert.equal(rows.get(id)[10],'');
  assert.equal(rows.get('complete')[9],'Other');assert.equal(rows.get('complete')[10],'Other Model');
 });
 
-test('a confirmed multi-order correction applies to the same set and part',()=>{
- const first='C520-260600014',second='C520-260700009',third='C520-626070046';
- const decorated='~~'+first+'~~<br>'+second+'\nSAP: '+third;
- const html='<s class="deleted">&#67;520-260600014</s><BR / ><del>C520&#x2d;260700009</del><br>SAP:&nbsp;<strike>'+third+'</strike>';
- const reordered=[third,second,first,first].join('\n');
- const order=[first,second,third].join('|').toLowerCase();
- const merger=mergerFor([row('decorated',decorated),row('html',html),row('reordered',reordered),row('single',first),row('subset',first+'\n'+second),row('other-part',decorated,'PART2'),row('invalid','&#1114112;<br>&#xD800;')]);
- assert.equal(applyConfirmedProductCorrections(merger,[{...correction,order}]),3);
- const rows=new Map([...merger.rows.values()].map(value=>[value.row[4],value.row]));
- for(const id of ['decorated','html','reordered'])assert.equal(rows.get(id)[10],'Model A');
- for(const id of ['single','subset','other-part','invalid'])assert.equal(rows.get(id)[10],'');
+test('legacy work-order corrections stay inactive in part-number analysis',()=>{
+ const merger=mergerFor([row('legacy')]);
+ assert.equal(applyConfirmedProductCorrections(merger,[{...correction,order:'wo123',override:true}]),0);
+ assert.equal([...merger.rows.values()][0].row[10],'');
 });

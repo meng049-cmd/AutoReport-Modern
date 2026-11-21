@@ -44,7 +44,7 @@ export function renderStageDrillContent(stage,model,host,path,leaf,onPath,onLeaf
   for(const [index,group] of groups.entries()){const choice=button(group.label+' · '+(dimension==='defect'?'基準投入 ':'投入 ')+group.input+' · '+(dimension==='defect'?'項目 PPID '+group.count+' · 不良率 ':'良率 ')+pct(group.value),()=>select(index));choice.dataset.key=group.key;choice.dataset.input=group.input;choice.dataset.bad=group.count;choice.dataset.yield=group.value;list.append(choice);}section.append(list);
   if(dimension==='defect'&&leaf){
    const records=leaf.records||[],page=Math.min(leaf.page||0,Math.max(0,Math.ceil(records.length/100)-1)),detail=document.createElement('div');detail.className='scroll';detail.style.maxHeight='320px';
-   detail.append(table(['日期','製程','產品','PPID','不良項目','狀態','工單'],records.slice(page*100,page*100+100).map(row=>[row.date,row.process,row.ic+'／'+row.model,row.serial,row.defect||'【未填不良項目】',row.status,row.order])));
+   detail.append(table(['日期','製程','產品','PPID','不良項目','狀態','料號'],records.slice(page*100,page*100+100).map(row=>[row.date,row.process,row.ic+'／'+row.model,row.serial,row.defect||'【未填不良項目】',row.status,row.order])));
    const pager=document.createElement('div');pager.className='row';const prev=button('上一頁',()=>onLeaf({...leaf,page:page-1})),next=button('下一頁',()=>onLeaf({...leaf,page:page+1}));prev.disabled=!page;next.disabled=(page+1)*100>=records.length;pager.append(prev,document.createTextNode(`${page+1} / ${Math.max(1,Math.ceil(records.length/100))} · ${records.length} 筆`),next);section.append(document.createTextNode('不良 PPID 明細'),detail,pager);
   }
   host.append(section);

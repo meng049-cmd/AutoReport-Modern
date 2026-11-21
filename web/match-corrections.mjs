@@ -1,4 +1,4 @@
-import {correctionPart,firstText,norm,orderCriterionKey,text} from './matcher.mjs';
+import {norm,text} from './matcher.mjs';
 
 export function correctionOptions(records=[],{includeFamily=false}={}){
  const collect=field=>{
@@ -36,13 +36,10 @@ function needsStageCorrection(row){
 }
 
 function identity(result,row){
- const criteria=(row['查找條件']||[]).map(item=>[item['欄位類別'],text(item['查找值'])]).filter(([,value])=>value);
- const order=criteria.find(([kind])=>kind==='order')?.[1]||'';
- const part=firstText(row[correctionPart])||criteria.find(([kind])=>kind==='part')?.[1]||'';
- const terms=order?[['order',orderCriterionKey(order)],...(part?[['part',norm(part)]]:[])]:criteria.map(([kind,value])=>[kind,norm(value)]).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
+ const part=text(row['查找條件']?.find(item=>item['欄位類別']==='part')?.['查找值']);
  // Rows without identifiers must never share a correction just because both are blank.
- const key=JSON.stringify(terms.length?terms:[['file',result['檔名']],['sheet',row['分頁']],['row',row['列號']]]);
- return {key,order,part,query:criteria.map(([,value])=>value).join('／')};
+ const key=JSON.stringify(part?[['part',norm(part)]]:[['file',result['檔名']],['sheet',row['分頁']],['row',row['列號']]]);
+ return {key,part};
 }
 
 export function matchCorrectionIdentity(result,row){return identity(result,row);}
@@ -78,12 +75,13 @@ export function applyMatchCorrections(result,corrections=[],options={}){
   const model=canonicalCorrectionName(correction.model,options.models),ic=canonicalCorrectionName(correction.ic,options.ics);
   if(!correction.key||!model||!ic)throw Error('補填對照必須完整填寫 IC 與機種。');
   const previous=updates.get(correction.key);
-  if(previous&&(previous.model!==model||previous.ic!==ic))throw Error('同一工單／料號有不同補填對照，請確認後再試。');
-  updates.set(correction.key,{model,ic});
+  if(previous&&(previous.model!==model||previous.ic!==ic))throw Error('同一料號有不同補填對照，請確認後再試。');
+  updates.set(correction.key,{model,ic,resolveConflict:correction.resolveConflict||previous?.resolveConflict});
  }
  if(!updates.size)return result;
  for(const row of result['結果']){
-  const update=updates.get(identity(result,row).key);if(!update)continue;
+  const update=updates.get(identity(result,row).key);
+  if(!update||(row['狀態']==='唯一匹配'&&!update.resolveConflict))continue;
   const source={'檔案':'本批次手動補填','分頁':row['分頁'],'列號':row['列號']};
   row['原比對狀態']=row['狀態'];row['狀態']='手動補填';row.IC=update.ic;row['機種']=update.model;
   row['候選']=[{IC:update.ic,'機種':update.model,'產品系列':[],'來源':[source]}];

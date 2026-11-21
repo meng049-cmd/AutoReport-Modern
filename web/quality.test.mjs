@@ -90,10 +90,10 @@ test('AOI is excluded from quality units, failures, mappings and denominators; D
  const empty=analyze([row('a','背面AOI','FAIL','excluded')]);assert.equal(empty.total,0);assert.equal(empty.yield,null);assert.equal(empty.badRate,null);const book=XLSX.utils.book_new();appendQualitySheets(XLSX,book,empty);assert.equal(book.Sheets['不良分析'].H2,undefined);
 });
 
-test('first non-AOI FAIL and its work order survive chronological XLSX sorting independently of AOI first NG',()=>{
- const book=XLSX.utils.book_new(),first=row('a','功能二測試','FAIL','輸入首筆有效FAIL',7),earlier=row('a','DAF外觀','FAIL','時間更早',3);first[1]='首次工單';earlier[1]='後來工單';XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([header,row('a','正面AOI','FAIL','AOI first',1),first,earlier]),'Detail');
+test('first non-AOI FAIL and its part number survive chronological XLSX sorting independently of AOI first NG',()=>{
+ const book=XLSX.utils.book_new(),first=row('a','功能二測試','FAIL','輸入首筆有效FAIL',7),earlier=row('a','DAF外觀','FAIL','時間更早',3);first[1]='首次工單';earlier[1]='後來工單';first[2]='FIRST-PART';earlier[2]='OTHER-PART';XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([header,row('a','正面AOI','FAIL','AOI first',1),first,earlier]),'Detail');
  const m=new DetailMerger(XLSX);m.add(book,'原始.xlsx');const merged=m.finish();assert.equal(merged.output_rows,3);assert.equal(m.firstNG.get('a').defect,'AOI first');
- const again=new DetailMerger(XLSX);again.add(DetailMerger.readBook(XLSX,XLSX.write(merged.book,{type:'array',bookType:'xlsx'})),'下載.xlsx');const a=analyzeQuality(again);assert.equal(a.total,1);assert.equal(a.fail,1);assert.equal(a.attribution[0].defect,'輸入首筆有效FAIL');assert.equal(a.attribution[0].order,'首次工單');
+ const again=new DetailMerger(XLSX);again.add(DetailMerger.readBook(XLSX,XLSX.write(merged.book,{type:'array',bookType:'xlsx'})),'下載.xlsx');const a=analyzeQuality(again);assert.equal(a.total,1);assert.equal(a.fail,1);assert.equal(a.attribution[0].defect,'輸入首筆有效FAIL');assert.equal(a.attribution[0].order,'FIRST-PART');
 });
 
 test('Scrap shares first-FAIL priority across dates and survives report reload with skipped-error audit',()=>{

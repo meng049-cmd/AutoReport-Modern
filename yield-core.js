@@ -13,7 +13,7 @@ function buildYieldReport(merger,identities,{includeDetail=true,period=null}={})
  for(const value of merger.rows.values()){
   if(!root.isAnalysisProcess(value.row[0]))continue;
   const row=value.row,rawIC=String(row[9]??'').trim(),rawModel=String(row[10]??'').trim(),identity=identities?.get(String(row[4]).trim()),ic=identity?.ic||rawIC,model=identity?.model||rawModel;
-  const incomplete=identity?identity.pending:!ic||!model;if(!rawIC||!rawModel){missingProductRows++;if(includeDetail)pendingRows.push(row);else{const key=JSON.stringify([row[1],row[2],rawIC,rawModel]),group=pendingGroups.get(key)||[row[1],row[2],rawIC,rawModel,0];group[4]++;pendingGroups.set(key,group);}}
+  const incomplete=identity?identity.pending:!ic||!model;if(!rawIC||!rawModel){missingProductRows++;if(includeDetail)pendingRows.push(row);else{const key=JSON.stringify([row[2],rawIC,rawModel]),group=pendingGroups.get(key)||[row[2],rawIC,rawModel,0];group[3]++;pendingGroups.set(key,group);}}
   const product=identity?.id||JSON.stringify([ic,model]),process=canonical(row[0]),key=JSON.stringify([product,value.day,process]);
   products.set(product,{ic:ic||'【待補 IC】',model:model||'【待補機種】',incomplete});processes.add(process);
   const count=counts.get(key)||{product,ic,model,day:value.day,process,good:0,fail:0,units:new Map()};
@@ -76,7 +76,7 @@ function buildYieldReport(merger,identities,{includeDetail=true,period=null}={})
  XLSX.utils.book_append_sheet(book,detailSheet,'計算明細');
  if(includeDetail){const detailRows=[...merger.rows.values()].sort((a,b)=>a.timestamp-b.timestamp);for(let offset=0,part=1;offset<detailRows.length;offset+=1048575,part++){const sheet=XLSX.utils.aoa_to_sheet([merger.header,...detailRows.slice(offset,offset+1048575).map(value=>value.row)],{dense:true});for(let r=1;r<sheet.length;r++)if(sheet[r]?.[merger.time])sheet[r][merger.time].z='yyyy-mm-dd hh:mm:ss';XLSX.utils.book_append_sheet(book,sheet,part===1?'Detail':'Detail_'+part);}}
  if(pendingRows.length){const pending=XLSX.utils.aoa_to_sheet([merger.header,...pendingRows]);for(let r=2;r<=pendingRows.length+1;r++)if(pending['F'+r])pending['F'+r].z='yyyy-mm-dd hh:mm:ss';XLSX.utils.book_append_sheet(book,pending,'待補產品資料');}
- if(pendingGroups.size)XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([['工單','料號','IC','機種','筆數'],...pendingGroups.values()]),'待補產品彙總');
+ if(pendingGroups.size)XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([['料號','IC','機種','筆數'],...pendingGroups.values()]),'待補產品彙總');
  book.Workbook={CalcPr:{calcMode:'auto',fullCalcOnLoad:true}};
  return {book,calculation:{stageChecks,dailyCounts:[...counts.values()].map(({units,...count})=>count)},filename:merged.filename.replace('.xlsx','_每日良率.xlsx'),product_count:[...products.values()].filter(p=>!p.incomplete).length,pending_product_count:[...products.values()].filter(p=>p.incomplete).length,missing_product_rows:missingProductRows,date_count:dates.length,input_rows:merged.input_rows,output_rows:merged.output_rows,removed_rows:merged.removed_rows,start_date:merged.start_date,end_date:merged.end_date};
 }

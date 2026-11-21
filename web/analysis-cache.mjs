@@ -3,7 +3,7 @@ const memory=new Map(),LIMIT=4;
 let db,epoch=0;
 const ready=new Promise(resolve=>{
  if(!globalThis.indexedDB){resolve();return;}
- const request=indexedDB.open('AutoReport-analysis-cache',1);
+ const request=indexedDB.open('AutoReport-Part-analysis-cache',1);
  request.onupgradeneeded=()=>{const store=request.result.createObjectStore('results',{keyPath:'key'});store.createIndex('reportId','reportId');store.createIndex('inputIds','inputIds',{multiEntry:true});};
  request.onerror=()=>resolve();request.onsuccess=()=>{db=request.result;db.onversionchange=()=>{db.close();db=null;};resolve();};
 });

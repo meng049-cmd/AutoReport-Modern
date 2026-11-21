@@ -7,7 +7,7 @@
   function ngRecord(row,value,statusColumn) {
     const status=normalizeDetailStatus(row[statusColumn]),defect=statusColumn===7?'':String(row[7]??'').trim();
     if(status!=='FAIL'&&!defect)return null;
-    return {order:String(row[1]??'').trim(),serial:String(row[4]).trim(),process:String(row[0]).trim(),date:value.day,timestamp:value.timestamp,status,defect:defect||'【未填不良項目】'};
+    return {order:String(row[1]??'').trim(),part:String(row[2]??'').trim(),serial:String(row[4]).trim(),process:String(row[0]).trim(),date:value.day,timestamp:value.timestamp,status,defect:defect||'【未填不良項目】'};
   }
   function canonicalAnalysisProcess(value){const name=String(value??'').normalize('NFKC').trim().replace(/\s+/g,'');return ({'DAF外觀檢查':'DAF外觀','DAF熱壓入':'DAF熱壓投入','功能一測':'功能一測試','功能一測試站':'功能一測試','功能二測':'功能二測試','功能二測試站':'功能二測試','外觀檢查點亮':'外觀檢查點亮測試','輝度機測':'輝度機測試'})[name]||name;}
   const isAnalysisProcess=value=>['DAF外觀','DAF熱壓投入','功能一測試','功能二測試','外觀檢查點亮測試','輝度機測試'].includes(canonicalAnalysisProcess(value));
@@ -64,21 +64,35 @@
       try {
         const validKeys=new Set(fileValues.map(v=>v.key));
         const saved=JSON.parse(book.Custprops?.AutoReportFirstNG||'null');
-        if([2,3,4].includes(saved?.version)&&saved.checksum===ngChecksum(fileValues.map(v=>v.row))&&Array.isArray(saved.records)){
-          if(saved.version===4){saved.records=saved.records.map(r=>({serial:r[0],process:r[1],date:r[2],timestamp:r[3],status:r[4],defect:r[5],order:r[6]||''}));saved.defectKeys=[...localDefectKeys,...saved.extraDefectKeys];}
+        if([2,3,4,5].includes(saved?.version)&&saved.checksum===ngChecksum(fileValues.map(v=>v.row))&&Array.isArray(saved.records)){
+          if(saved.version>=4){saved.records=saved.records.map(r=>({serial:r[0],process:r[1],date:r[2],timestamp:r[3],status:r[4],defect:r[5],order:r[6]||'',part:saved.version===5?r[7]:undefined}));saved.defectKeys=[...localDefectKeys,...saved.extraDefectKeys];}
           const keys=new Set(saved.defectKeys),serials=new Set(saved.records.map(r=>r?.serial));
-          const valid=(saved.version===2||[...localDefectKeys].every(k=>keys.has(k)))&&saved.defectKeys.every(k=>typeof k==='string'&&validKeys.has(k))&&serials.size===saved.records.length&&saved.records.every(r=>r&&typeof r.serial==='string'&&typeof r.process==='string'&&typeof r.defect==='string'&&r.defect.trim()&&['GOOD','FAIL'].includes(r.status)&&Number.isFinite(r.timestamp)&&typeof r.date==='string'&&keys.has(JSON.stringify([r.date,r.process,r.serial])))&&saved.defectKeys.every(k=>serials.has(JSON.parse(k)[2]));
+          const valid=(saved.version===2||[...localDefectKeys].every(k=>keys.has(k)))&&saved.defectKeys.every(k=>typeof k==='string'&&validKeys.has(k))&&serials.size===saved.records.length&&saved.records.every(r=>r&&typeof r.serial==='string'&&typeof r.process==='string'&&typeof r.defect==='string'&&(saved.version!==5||typeof r.part==='string')&&r.defect.trim()&&['GOOD','FAIL'].includes(r.status)&&Number.isFinite(r.timestamp)&&typeof r.date==='string'&&keys.has(JSON.stringify([r.date,r.process,r.serial])))&&saved.defectKeys.every(k=>serials.has(JSON.parse(k)[2]));
           if(valid){candidates=new Map(saved.records.map(r=>[r.serial,r]));for(const [serial,ng] of localNG)if(preferNG(ng,candidates.get(serial)))candidates.set(serial,ng);defectKeys=new Set([...keys,...localDefectKeys]);}
         }
       } catch { /* Older or edited files are analyzed from their readable Detail rows. */ }
       let analysisCandidates=new Map([...candidates].filter(([,ng])=>isAnalysisProcess(ng.process)));
       try{const saved=JSON.parse(book.Custprops?.AutoReportAnalysisNG||'null'),validKeys=new Set(fileValues.map(v=>v.key));
-        if(saved?.version===1&&saved.checksum===ngChecksum(fileValues.map(v=>v.row))&&Array.isArray(saved.records)){
-          const records=saved.records.map(r=>({serial:r[0],process:r[1],date:r[2],timestamp:r[3],status:r[4],defect:r[5],order:r[6]||''}));
-          if(new Set(records.map(r=>r.serial)).size===records.length&&records.every(r=>typeof r.serial==='string'&&typeof r.process==='string'&&typeof r.defect==='string'&&typeof r.order==='string'&&r.defect.trim()&&isAnalysisProcess(r.process)&&['GOOD','FAIL'].includes(r.status)&&Number.isFinite(r.timestamp)&&validKeys.has(JSON.stringify([r.date,r.process,r.serial]))))analysisCandidates=new Map(records.map(r=>[r.serial,r]));
+        if([1,2].includes(saved?.version)&&saved.checksum===ngChecksum(fileValues.map(v=>v.row))&&Array.isArray(saved.records)){
+          const records=saved.records.map(r=>({serial:r[0],process:r[1],date:r[2],timestamp:r[3],status:r[4],defect:r[5],order:r[6]||'',part:saved.version===2?r[7]:undefined}));
+          if(new Set(records.map(r=>r.serial)).size===records.length&&records.every(r=>typeof r.serial==='string'&&typeof r.process==='string'&&typeof r.defect==='string'&&typeof r.order==='string'&&(saved.version!==2||typeof r.part==='string')&&r.defect.trim()&&isAnalysisProcess(r.process)&&['GOOD','FAIL'].includes(r.status)&&Number.isFinite(r.timestamp)&&validKeys.has(JSON.stringify([r.date,r.process,r.serial]))))analysisCandidates=new Map(records.map(r=>[r.serial,r]));
         }
       }catch{}
       for(const [serial,ng] of localAnalysisNG)if(preferNG(ng,analysisCandidates.get(serial)))analysisCandidates.set(serial,ng);
+      // Older metadata lacks a part number. Recover it only from an identifiable source record.
+      const missingPart=new Map();
+      const evidenceKey=record=>JSON.stringify([record.serial,record.process,record.date,record.timestamp,record.status,record.defect,record.order]);
+      for(const records of [candidates,analysisCandidates])for(const ng of records.values())if(ng.part===undefined)missingPart.set(evidenceKey(ng),new Set());
+      if(missingPart.size){
+        for(const value of fileValues){
+          const record=ngRecord(value.row,value,this.status);
+          if(record)missingPart.get(evidenceKey(record))?.add(record.part);
+        }
+        for(const records of [candidates,analysisCandidates])for(const ng of records.values())if(ng.part===undefined){
+          const parts=missingPart.get(evidenceKey(ng));
+          ng.part=parts?.size===1?[...parts][0]:'';
+        }
+      }
       const readableOrders=new Map(fileValues.map(v=>[v.key,String(v.row[1]??'').trim()]));
       for(const ng of analysisCandidates.values())if(!ng.order)ng.order=readableOrders.get(JSON.stringify([ng.date,ng.process,ng.serial]))||'';
       for(const [serial,ng] of analysisCandidates)if(preferNG(ng,this.analysisFirstNG.get(serial)))this.analysisFirstNG.set(serial,ng);
@@ -128,8 +142,8 @@
         if (cell) cell.z = 'yyyy-mm-dd hh:mm:ss';
       }
       const book = XLSX.utils.book_new(); if(sheet)XLSX.utils.book_append_sheet(book, sheet, 'Detail');
-      book.Custprops={AutoReportFirstNG:JSON.stringify({version:4,checksum:ngChecksum(rows.map(v=>v.row)),records:firstNG.map(r=>[r.serial,r.process,r.date,r.timestamp,r.status,r.defect,r.order||'']),extraDefectKeys:rows.filter(v=>this.hasDefect(v)&&!ngRecord(v.row,v,this.status)).map(v=>v.key)}).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'))};
-      book.Custprops.AutoReportAnalysisNG=JSON.stringify({version:1,checksum:ngChecksum(rows.map(v=>v.row)),records:analysisFirstNG.map(r=>[r.serial,r.process,r.date,r.timestamp,r.status,r.defect,r.order||''])}).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'));
+      book.Custprops={AutoReportFirstNG:JSON.stringify({version:5,checksum:ngChecksum(rows.map(v=>v.row)),records:firstNG.map(r=>[r.serial,r.process,r.date,r.timestamp,r.status,r.defect,r.order||'',r.part||'']),extraDefectKeys:rows.filter(v=>this.hasDefect(v)&&!ngRecord(v.row,v,this.status)).map(v=>v.key)}).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'))};
+      book.Custprops.AutoReportAnalysisNG=JSON.stringify({version:2,checksum:ngChecksum(rows.map(v=>v.row)),records:analysisFirstNG.map(r=>[r.serial,r.process,r.date,r.timestamp,r.status,r.defect,r.order||'',r.part||''])}).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'));
       book.Custprops.AutoReportSources=JSON.stringify([...this.sources]).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'));
       if(skippedRows.length)book.Custprops.AutoReportSkippedRows=JSON.stringify(skippedRows).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0'));
       return {book, filename, input_rows: selectedRows?rows.length:this.total, output_rows: rows.length, removed_rows: selectedRows?0:this.total - rows.length, skipped_rows:skippedRows.length, start_date: first, end_date: last};

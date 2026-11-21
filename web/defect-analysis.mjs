@@ -31,7 +31,7 @@ export function calendarBuckets(start,end,mode='day'){
  const map=new Map();for(const date of calendarDates(start,end)){const key=periodKey(date,mode);if(!map.has(key))map.set(key,{key,label:periodLabel(key,mode),...periodBounds(key,mode)});}return [...map.values()];
 }
 export function scopedBuckets(start,end,filters={}){const buckets=calendarBuckets(start,end,filters.granularity);return filters.granularity==='day'&&filters.days?.length?buckets.filter(bucket=>filters.days.includes(bucket.key)):buckets;}
-export const orderName=value=>String(value??'').trim()||'【未填工單】';
+export const orderName=value=>String(value??'').trim()||'【未填料號】';
 export const dateFilterUnit=filters=>filters.dateUnit||filters.granularity||'day';
 function matches(row,filters,ignoreDefect=false){return (!filters.productIds||filters.productIds.has(row.product))&&(!filters.processNames||filters.processNames.has(row.process))&&!filters.invalidProcess&&(!filters.stage||isStageProcess(row.process,filters.stage))&&(!filters.order||orderName(row.order)===filters.order)&&(!filters.startDate||row.date>=filters.startDate)&&(!filters.endDate||row.date<=filters.endDate)&&(!filters.days?.length||filters.days.includes(row.date))&&(!filters.date||periodKey(row.date,dateFilterUnit(filters))===filters.date)&&['product','process',...(ignoreDefect?[]:['defect'])].every(key=>!filters[key]||row[key]===filters[key]);}
 export function attributedRows(analysis,filters={}){const scope=processScope(filters);return analysis.attribution.filter(row=>matches(row,scope));}
@@ -78,7 +78,7 @@ export function allDefectLevels(analysis,filters={},order=dimensions){
  return [...groups.values()].map(row=>{const input=cohortInput(analysis,{...filters,...row,process:row.process||row.defectProcess||filters.process});return {...row,input,rate:input?row.count/input:null,contribution:analysis.total?row.count/analysis.total:0};}).sort((a,b)=>{for(const key of order){const difference=(a[key]||'').localeCompare(b[key]||'');if(difference)return difference;}return 0;});
 }
 export function workOrderRows(analysis,filters={}){
- const groups=new Map();for(const row of attributedRows(analysis,filters)){const key=JSON.stringify([row.product,row.order||'']),group=groups.get(key)||{product:row.product,ic:row.ic,model:row.model,order:row.order||'【未填工單】',count:0,dates:new Set(),defects:new Set(),units:new Set()};group.count++;group.units.add(row.serial);group.dates.add(row.date);group.defects.add(row.defect);groups.set(key,group);}
+ const groups=new Map();for(const row of attributedRows(analysis,filters)){const key=JSON.stringify([row.product,row.order||'']),group=groups.get(key)||{product:row.product,ic:row.ic,model:row.model,order:row.order||'【未填料號】',count:0,dates:new Set(),defects:new Set(),units:new Set()};group.count++;group.units.add(row.serial);group.dates.add(row.date);group.defects.add(row.defect);groups.set(key,group);}
  for(const row of filteredObservations(analysis,filters)){const group=groups.get(JSON.stringify([row.product,row.order||'']));if(group)group.units.add(row.serial);}
  return [...groups.values()].map(group=>({...group,input:group.units.size,dates:[...group.dates].sort().join('、'),defects:[...group.defects].join('；'),contribution:analysis.total?group.count/analysis.total:0,units:undefined})).sort((a,b)=>b.count-a.count||a.order.localeCompare(b.order));
 }

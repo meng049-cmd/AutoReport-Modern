@@ -4,7 +4,7 @@ export function mountTrendOrderDetail(host, periods, lines, load) {
 
  const details = document.createElement('details');
  const summary = document.createElement('summary');
- summary.textContent = '工單明細';
+ summary.textContent = '料號明細';
  const periodLabel = document.createElement('label');
  const periodSelect = document.createElement('select');
  periodLabel.append('日期區間 ',periodSelect);
@@ -25,7 +25,7 @@ export function mountTrendOrderDetail(host, periods, lines, load) {
  }
  const note = document.createElement('p');
  note.className = 'muted';
- note.textContent = '整段日期依工單加總各點的投入與不良，再計算不良率。同一 PPID 跨日期點可能重複計入。';
+ note.textContent = '整段日期依料號加總各點的投入與不良，再計算不良率。同一 PPID 跨日期點可能重複計入。';
  const status = document.createElement('p');
  status.setAttribute('role','status');
  const content = document.createElement('div');
@@ -43,7 +43,7 @@ export function mountTrendOrderDetail(host, periods, lines, load) {
   const pages = Math.ceil(rows.length/pageSize);
   const table = document.createElement('table');
   const head = table.createTHead().insertRow();
-  for (const title of ['工單','投入 PPID','不良 PPID','不良率']) {
+  for (const title of ['料號','投入 PPID','不良 PPID','不良率']) {
    const th = document.createElement('th');
    th.scope = 'col';
    th.textContent = title;
@@ -78,17 +78,17 @@ export function mountTrendOrderDetail(host, periods, lines, load) {
   const current = new AbortController();
   request = current;
   content.replaceChildren();
-  status.textContent = '正在讀取工單明細…';
+  status.textContent = '正在讀取料號明細…';
   try {
    const index = periodSelect.value === '' ? null : Number(periodSelect.value);
    const rows = await load(lines[Number(select.value)], index, current.signal, message => {
     if (!current.signal.aborted) status.textContent = message;
    });
    if (current.signal.aborted) return;
-   status.textContent = rows.length ? '共 '+rows.length+' 張工單' : '本區間沒有符合條件的工單。';
+   status.textContent = rows.length ? '共 '+rows.length+' 個料號' : '本區間沒有符合條件的料號。';
    if (rows.length) renderPage(rows,0);
   } catch (error) {
-   if (!current.signal.aborted) status.textContent = '無法讀取工單明細。'+error.message;
+   if (!current.signal.aborted) status.textContent = '無法讀取料號明細。'+error.message;
   }
  }
  details.ontoggle = refresh;
