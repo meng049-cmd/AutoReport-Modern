@@ -170,7 +170,7 @@ $('matchConfirmDatabase').onclick=async()=>{
   const {reference,count}=await databaseCall('confirmCorrections',items);
   await invalidateProductAnalysisCaches();
   await call('reload',{reference});applyDatabaseStats(await call('stats'));databaseChannel?.postMessage('changed');
-  $('matchCorrectionSaveStatus').textContent=`已確認並儲存 ${count} 組料號對照；未來相同料號可自動比對。需要雲端備份時，請按「上傳本機資料」。`;
+  $('matchCorrectionSaveStatus').textContent=`已確認並儲存 ${count} 組料號對照；未來相同料號可自動比對。可用「下載料號版本機備份」保留對照。`;
  }catch(e){$('matchCorrectionSaveStatus').textContent=e.message;}
  finally{$('matchCorrectionFields').disabled=false;endFileOperation();}
 };

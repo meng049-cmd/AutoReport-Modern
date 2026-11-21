@@ -17,7 +17,7 @@ test('batch matching paginates missing parts, retains edits, regenerates Excel a
   if(pathname==='/reference.json'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify(reference));return;}
   const file=path.resolve(root,pathname==='/'?'index.html':pathname.slice(1));
   if(!file.startsWith(root+path.sep)){res.writeHead(404).end();return;}
-  try{res.setHeader('Content-Type',/\.m?js$/.test(file)?'text/javascript':file.endsWith('.html')?'text/html':file.endsWith('.json')?'application/json':'application/octet-stream');res.end(await readFile(file));}catch{res.writeHead(404).end();}
+  try{res.setHeader('Content-Type',/\.m?js$/.test(file)?'text/javascript':file.endsWith('.html')?'text/html':file.endsWith('.json')?'application/json':file.endsWith('.wasm')?'application/wasm':'application/octet-stream');res.end(await readFile(file));}catch{res.writeHead(404).end();}
  });
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  let browser;
