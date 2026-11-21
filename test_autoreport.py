@@ -193,6 +193,29 @@ class DatabaseTests(unittest.TestCase):
         csv = '製程,工單,料號\nDAF外觀,ORDER003,SHARED\n'.encode()
         self.assertEqual(a.match_upload(self.db, csv, 'Detail.csv')['結果'][0]['狀態'], '多組候選')
 
+    def test_taroko_model_aliases_resolve_in_part_and_detail_matches(self):
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = '料號對照'
+        sheet.append(['工單', '料號', '機種', 'IC'])
+        sheet.append(['WO114', '95000011-101', 'ＴＫ１４', 'Goodix'])
+        sheet.append(['WO114', '95000011-101', 'Taroko14', 'Goodix'])
+        sheet.append(['WO116', '95000011-102', 'TK16', 'Elan'])
+        sheet.append(['WO116', '95000011-102', 'Taroko16', 'Elan'])
+        sheet.append(['WO117', '95000011-103', 'TK14 Backup', 'Goodix'])
+        payload = io.BytesIO()
+        workbook.save(payload)
+        a.import_excel(self.db, payload.getvalue(), 'models.xlsx', ['料號對照'])
+
+        for part, order, model in [('95000011-101', 'WO114', 'Taroko 14'),
+                                   ('95000011-102', 'WO116', 'Taroko 16')]:
+            for result in (a.lookup(self.db, [('part', part)]), a.lookup_detail(self.db, '93000011-101', order)):
+                self.assertEqual(result['狀態'], '唯一匹配')
+                self.assertEqual(result['候選'][0]['機種'], model)
+                self.assertEqual(len(result['候選'][0]['來源']), 2)
+        self.assertEqual([row['model'] for row in a.search(self.db, '95000011-101')], ['ＴＫ１４', 'Taroko14'])
+        self.assertEqual(a.lookup(self.db, [('part', '95000011-103')])['候選'][0]['機種'], 'TK14 Backup')
+
     def test_excel_formula_injection_exported_as_text(self):
         result = a.match_upload(self.db, '查询值\n=HYPERLINK("evil")\n'.encode(), 'formula.csv')
         book = load_workbook(io.BytesIO(a.export_matches(result)), data_only=False)

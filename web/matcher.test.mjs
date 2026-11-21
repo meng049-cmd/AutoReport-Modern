@@ -105,3 +105,24 @@ test('Detail uses exact work-order evidence only when the part lookup is insuffi
  assert.equal(rows[2]['原始資料'][1],'~~WO1~~');
  assert.equal(reference.lookup([['order','WO1']])['狀態'],'缺少查找欄位');
 });
+
+test('Taroko aliases collapse model candidates while preserving IC distinctions',()=>{
+ const named=[
+  {...records[0],id:1,model:'TK14',ic:'Goodix'},
+  {...records[0],id:2,model:'Taroko 14',ic:'Goodix'},
+  {...records[0],id:3,model:'ＴＫ１６',ic:'Goodix'},
+  {...records[0],id:4,model:'Taroko16',ic:'Synaptics'}
+ ];
+ const reference=new Matcher({records:named,keys:[
+  ['part','part14',1],['part','part14',2],['part','part16',3],['part','part16',4]
+ ]});
+ const taroko14=reference.lookup([['part','PART14']]);
+ assert.equal(taroko14['狀態'],'唯一匹配');
+ assert.equal(taroko14['候選'][0]['機種'],'Taroko 14');
+ assert.equal(taroko14['候選'][0]['來源'].length,2);
+ const taroko16=reference.lookup([['part','PART16']]);
+ assert.equal(taroko16['狀態'],'多組候選');
+ assert.deepEqual(taroko16['候選'].map(candidate=>[candidate.IC,candidate['機種']]),[
+  ['Goodix','Taroko 16'],['Synaptics','Taroko 16']
+ ]);
+});

@@ -33,6 +33,12 @@ ORDER_SEPARATOR = re.compile(r'<br\s*/?\s*>|[\r\n;；、,，\\]+', re.I)
 LEGACY_ORDER_PATTERN = re.compile(r'(?:SAP\s*:\s*)?([A-Z]{2,}[-_]?[0-9]+)')
 DASH_VARIANTS = str.maketrans({'–': '-', '—': '-', '−': '-'})
 PART_PATTERN = re.compile(r'(?<!\d)\d{8}-\d{3}(?!\d)')
+MODEL_ALIASES = {
+    'tk14': 'Taroko 14',
+    'taroko14': 'Taroko 14',
+    'tk16': 'Taroko 16',
+    'taroko16': 'Taroko 16',
+}
 
 
 def norm(value):
@@ -40,6 +46,10 @@ def norm(value):
     value = unicodedata.normalize('NFKC', str(value or ''))
     value = value.translate(DASH_VARIANTS)
     return re.sub(r'\s+', '', CC.convert(value).casefold())
+
+
+def canonical_model(value):
+    return MODEL_ALIASES.get(norm(value), value)
 
 
 def text(value):
@@ -367,6 +377,7 @@ def reconcile_missing_ic(db, source_id):
     for record in unresolved:
         # Finished-product identifiers take precedence over shared component identifiers.
         references = {}
+        source_model = norm(canonical_model(record['model']))
         for part in primary_parts(record):
             for reference in db.execute('''SELECT other.id,other.ic,other.model,other.raw_ic FROM lookup_keys k
                 JOIN records other ON other.id=k.record_id JOIN sheets s ON s.id=other.sheet_id
@@ -376,7 +387,7 @@ def reconcile_missing_ic(db, source_id):
                     continue
                 if a_model := reference['model']:
                     # A specific source model constrains matches; CY26 is a generation-level label.
-                    if record['model'] and norm(record['model']) != 'cy26' and norm(a_model) != norm(record['model']):
+                    if source_model and source_model != 'cy26' and norm(canonical_model(a_model)) != source_model:
                         continue
                 references[reference['id']] = reference
         brands = {norm(r['ic']): r['ic'] for r in references.values() if available(r['ic'])}
@@ -388,7 +399,7 @@ def reconcile_missing_ic(db, source_id):
             db.execute('UPDATE records SET ic=?,resolution_json=?,search_text=search_text||? WHERE id=?',
                        (ic, json.dumps(notes, ensure_ascii=False), norm(ic), record['id']))
             db.execute('INSERT OR IGNORE INTO lookup_keys VALUES(?,?,?)', ('ic', norm(ic), record['id']))
-            models = {norm(r['model']): r['model'] for r in references.values() if available(r['model'])}
+            models = {norm(canonical_model(r['model'])): r['model'] for r in references.values() if available(r['model'])}
             if not record['model'] and len(models) == 1:
                 model = next(iter(models.values()))
                 notes.append('以相同主料號跨頁確認機種：' + model)
@@ -441,6 +452,7 @@ def lookup(db, criteria):
     sets, all_candidates, evidence, resolved_criteria = [], {}, {}, []
 
     def add_candidate(key, model, ic, family, source):
+        model = canonical_model(model)
         pair = (norm(model), norm(ic))
         candidate = all_candidates.setdefault(pair, {'機種': model, 'IC': ic, '產品系列': set(), '來源': {}})
         if family:
@@ -523,11 +535,11 @@ def lookup_detail(db, part, order):
                for record_id in sorted(selected_ids)]
     if not records or any(not available(row['model']) or not available(row['ic']) for row in records):
         return baseline
-    if len({(norm(row['model']), norm(row['ic'])) for row in records}) != 1:
+    if len({(norm(canonical_model(row['model'])), norm(row['ic'])) for row in records}) != 1:
         return baseline
 
     sources = [lookup_source(record) for record in records]
-    candidate = {'機種': records[0]['model'], 'IC': records[0]['ic'],
+    candidate = {'機種': canonical_model(records[0]['model']), 'IC': records[0]['ic'],
                  '產品系列': sorted({row['family'] for row in records if row['family']}), '來源': sources}
     condition = {'欄位類別': 'order', '查找值': '\n'.join(orders), '找到候選組數': 1}
     return {'狀態': '唯一匹配', '候選': [candidate], '查找條件': baseline['查找條件'] + [condition],

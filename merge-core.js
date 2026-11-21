@@ -9,6 +9,13 @@
     if(status!=='FAIL'&&!defect)return null;
     return {order:String(row[1]??'').trim(),part:String(row[2]??'').trim(),serial:String(row[4]).trim(),process:String(row[0]).trim(),date:value.day,timestamp:value.timestamp,status,defect:defect||'【未填不良項目】'};
   }
+  function canonicalModelName(value){
+    const name=String(value??'').trim();
+    const key=name.normalize('NFKC').replace(/\s+/g,'').toUpperCase();
+    if(key==='TK14'||key==='TAROKO14')return 'Taroko 14';
+    if(key==='TK16'||key==='TAROKO16')return 'Taroko 16';
+    return name;
+  }
   function canonicalAnalysisProcess(value){const name=String(value??'').normalize('NFKC').trim().replace(/\s+/g,'');return ({'DAF外觀檢查':'DAF外觀','DAF熱壓入':'DAF熱壓投入','DAF投入':'DAF熱壓投入','功能一測':'功能一測試','功能一測試站':'功能一測試','功能二測':'功能二測試','功能二測試站':'功能二測試','外觀檢查點亮':'外觀檢查點亮測試','輝度機測':'輝度機測試'})[name]||name;}
   const isAnalysisProcess=value=>['DAF外觀','DAF熱壓投入','功能一測試','功能二測試','外觀檢查點亮測試','輝度機測試'].includes(canonicalAnalysisProcess(value));
   const preferNG=(next,previous)=>!previous||(next.status==='FAIL'&&previous.status!=='FAIL');
@@ -149,6 +156,6 @@
       return {book, filename, input_rows: selectedRows?rows.length:this.total, output_rows: rows.length, removed_rows: selectedRows?0:this.total - rows.length, skipped_rows:skippedRows.length, start_date: first, end_date: last};
     }
   }
-  root.canonicalAnalysisProcess=canonicalAnalysisProcess;root.DetailMerger = DetailMerger;root.isAnalysisProcess=isAnalysisProcess;root.normalizeDetailStatus=normalizeDetailStatus;
+  root.canonicalModelName=canonicalModelName;root.canonicalAnalysisProcess=canonicalAnalysisProcess;root.DetailMerger = DetailMerger;root.isAnalysisProcess=isAnalysisProcess;root.normalizeDetailStatus=normalizeDetailStatus;
   if (typeof module !== 'undefined') module.exports = DetailMerger;
 })(typeof self !== 'undefined' ? self : globalThis);

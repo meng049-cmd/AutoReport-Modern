@@ -1,7 +1,9 @@
+import '../merge-core.js';
 import * as OpenCC from 'opencc-js';
 const convert = OpenCC.Converter({from:'t', to:'cn'});
 export const text = v => v == null ? '' : String(v).trim();
 export const norm = v => convert(text(v).normalize('NFKC').replace(/[–—−]/g,'-')).toLowerCase().replace(/\s+/g,'');
+export const canonicalModelName=globalThis.canonicalModelName;
 export const firstText = v => text(v).split(/[\r\n;；、]+/).find(s=>s.trim())?.trim() || '';
 const available = v => !['','-','n/a','na','none','无','未知'].includes(norm(v));
 function orderNumbers(value){
@@ -54,6 +56,7 @@ export class Matcher {
     const describe=(value,count)=>({'欄位類別':'part','查找值':value,'找到候選組數':count});
     const sets=[],all=new Map(),evidence=new Map(),resolved=[];
     const addCandidate=(key,model,ic,family,source)=>{
+      model=canonicalModelName(model);
       const pair=JSON.stringify([norm(model),norm(ic)]);
       if(!all.has(pair))all.set(pair,{'機種':model,IC:ic,'產品系列':new Set(),'來源':new Map()});
       const candidate=all.get(pair);
@@ -116,8 +119,8 @@ export class Matcher {
     if(!records.length)return result;
     const first=records[0];
     if(records.some(record=>!available(record.ic)||!available(record.model)
-      ||norm(record.ic)!==norm(first.ic)||norm(record.model)!==norm(first.model)))return result;
-    const candidate={'機種':first.model,IC:first.ic,
+      ||norm(record.ic)!==norm(first.ic)||norm(canonicalModelName(record.model))!==norm(canonicalModelName(first.model))))return result;
+    const candidate={'機種':canonicalModelName(first.model),IC:first.ic,
       '產品系列':[...new Set(records.map(record=>record.family).filter(Boolean))].sort(),
       '來源':records.map(record=>this.source(record))};
     const orderCondition={'欄位類別':'order','查找值':orders.join('\n'),'找到候選組數':1};

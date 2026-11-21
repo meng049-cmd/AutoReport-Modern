@@ -7,12 +7,12 @@ function applyConfirmedProductCorrections(merger,corrections=[],applied){
  if(!mappings.size)return 0;
  let updated=0;
  for(const value of merger.rows.values()){
-  const row=value.row,ic=String(row[9]??'').trim(),model=String(row[10]??'').trim();
+  const row=value.row,ic=String(row[9]??'').trim(),model=root.canonicalModelName(row[10]);
   const part=String(row[2]??'').split(/[\r\n;；、]+/).find(value=>value.trim());
   const saved=mappings.get(norm(part));
   if(!saved)continue;
-  if(!saved.override&&((ic&&model)||(ic&&norm(ic)!==norm(saved.ic))||(model&&norm(model)!==norm(saved.model))))continue;
-  row[9]=saved.ic;row[10]=saved.model;if(saved.override)applied?.add(saved);updated++;
+  if(!saved.override&&((ic&&model)||(ic&&norm(ic)!==norm(saved.ic))||(model&&norm(model)!==norm(root.canonicalModelName(saved.model)))))continue;
+  row[9]=saved.ic;row[10]=root.canonicalModelName(saved.model);if(saved.override)applied?.add(saved);updated++;
  }
  return updated;
 }

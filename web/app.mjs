@@ -7,7 +7,7 @@ import JSZip from 'jszip';
 import ExcelJS from 'exceljs';
 import {setReferenceSources} from './report-context.mjs';
 import {firstText,norm} from './matcher.mjs';
-import {canonicalCorrectionName} from './match-corrections.mjs';
+import {canonicalCorrectionModel,canonicalCorrectionName} from './match-corrections.mjs';
 import {invalidateProductAnalysisCaches} from './analysis-cache.mjs';
 const $=id=>document.getElementById(id);
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -147,7 +147,7 @@ $('matchRegenerate').onclick=async()=>{
  try{
   const updates=new Map(),groups=[...correctionGroups.values()];
   for(let index=0;index<groups.length;index++){
-   const value=correctionDrafts.get(groups[index].key)||batchCorrections.get(groups[index].key)||{},ic=canonicalCorrectionName(value.ic,matchOptions.ics),model=canonicalCorrectionName(value.model,matchOptions.models);
+   const value=correctionDrafts.get(groups[index].key)||batchCorrections.get(groups[index].key)||{},ic=canonicalCorrectionName(value.ic,matchOptions.ics),model=canonicalCorrectionModel(value.model,matchOptions.models);
    if(!ic&&!model)continue;
    if(!ic||!model)throw Error(`第 ${index+1} 組料號請完整填寫 IC 與機種。`);
    updates.set(groups[index].key,{key:groups[index].key,ic,model,resolveConflict:Boolean(groups[index].conflictPPIDs?.size||value.resolveConflict)});
@@ -161,7 +161,7 @@ $('matchConfirmDatabase').onclick=async()=>{
  if(libraryIsBusy())return;
  const applied=[...batchCorrections.values()];
  if(!applied.length){$('matchCorrectionSaveStatus').textContent='請先套用 IC／機種並重新產生結果，再確認保存。';return;}
- for(const [key,draft] of correctionDrafts){const value=batchCorrections.get(key);if(!value||canonicalCorrectionName(draft.ic,matchOptions.ics)!==value.ic||canonicalCorrectionName(draft.model,matchOptions.models)!==value.model){$('matchCorrectionSaveStatus').textContent='有尚未套用的補填，請先重新產生結果再保存。';return;}}
+ for(const [key,draft] of correctionDrafts){const value=batchCorrections.get(key);if(!value||canonicalCorrectionName(draft.ic,matchOptions.ics)!==value.ic||canonicalCorrectionModel(draft.model,matchOptions.models)!==value.model){$('matchCorrectionSaveStatus').textContent='有尚未套用的補填，請先重新產生結果再保存。';return;}}
  const items=applied.map(({key,ic,model})=>({part:norm(correctionGroups.get(key)?.part),ic,model}));
  if(items.some(item=>!item.part)){$('matchCorrectionSaveStatus').textContent='請先補齊原始料號，才能將這筆補填儲存為長期對照。';return;}
  if(!beginFileOperation())return;
@@ -253,7 +253,7 @@ $('loadOrderCorrection').onclick=loadPartCorrection;
 $('orderCorrectionForm').onsubmit=async event=>{
  event.preventDefault();
  const part=firstText($('editPart').value);
- const ic=canonicalCorrectionName($('editIC').value,matchOptions.ics),model=canonicalCorrectionName($('editModel').value,matchOptions.models),family=canonicalCorrectionName($('editFamily').value,matchOptions.families);
+ const ic=canonicalCorrectionName($('editIC').value,matchOptions.ics),model=canonicalCorrectionModel($('editModel').value,matchOptions.models),family=canonicalCorrectionName($('editFamily').value,matchOptions.families);
  const status=$('orderCorrectionStatus');
  if(!part||!ic||!model){status.textContent='請填寫料號、IC 與機種。';return;}
  if(!beginFileOperation())return;

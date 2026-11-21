@@ -40,3 +40,17 @@ test('legacy work-order corrections stay inactive in part-number analysis',()=>{
  assert.equal(applyConfirmedProductCorrections(merger,[{...correction,order:'wo123',override:true}]),0);
  assert.equal([...merger.rows.values()][0].row[10],'');
 });
+
+test('Taroko aliases share one product identity across existing Detail rows',()=>{
+ const first=row('serial14','WO1','PART1','Goodix','TK14');
+ const second=row('serial14','WO2','PART1','Goodix','Taroko 14');
+ second[0]='功能一測試';
+ const third=row('serial16','WO1','PART2','Synaptics','TK16');
+ const fourth=row('serial16','WO2','PART2','Synaptics','Taroko 16');
+ fourth[0]='功能二測試';
+ const analysis=globalThis.analyzeQuality(mergerFor([first,second,third,fourth]));
+ assert.equal(analysis.identityConflicts.length,0);
+ assert.deepEqual(analysis.products.map(product=>[product.model,product.total]).sort(),[
+  ['Taroko 14',1],['Taroko 16',1]
+ ]);
+});

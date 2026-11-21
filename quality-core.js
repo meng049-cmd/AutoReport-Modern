@@ -7,7 +7,7 @@ function analyzeQuality(merger){
  const processName=value=>root.canonicalProcess?root.canonicalProcess(value):String(value).trim().replace(/\s+/g,'')==='DAF外觀檢查'?'DAF外觀':String(value).trim().replace(/\s+/g,'');
  const addProcess=(map,key,unit,fail,meta)=>{const item=map.get(key)||{...meta,units:new Map()};item.units.set(unit,Boolean(item.units.get(unit)||fail));map.set(key,item);};
  for(const value of merger.rows.values()){
-  const row=value.row,ic=String(row[9]??'').trim(),model=String(row[10]??'').trim();
+  const row=value.row,ic=String(row[9]??'').trim(),model=root.canonicalModelName(row[10]);
   if(!root.isAnalysisProcess(row[0]))continue;
   const serial=String(row[4]).trim(),process=processName(row[0]);
   const fail=merger.hasDefect(value);

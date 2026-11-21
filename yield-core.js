@@ -12,7 +12,7 @@ function buildYieldReport(merger,identities,{includeDetail=true,period=null}={})
  if(merger.header?.[9]!=='IC'||merger.header?.[10]!=='機種')throw Error('主檔 J 欄須為 IC、K 欄須為機種，請先完成比對。');
  for(const value of merger.rows.values()){
   if(!root.isAnalysisProcess(value.row[0]))continue;
-  const row=value.row,rawIC=String(row[9]??'').trim(),rawModel=String(row[10]??'').trim(),identity=identities?.get(String(row[4]).trim()),ic=identity?.ic||rawIC,model=identity?.model||rawModel;
+  const row=value.row,rawIC=String(row[9]??'').trim(),rawModel=root.canonicalModelName(row[10]),identity=identities?.get(String(row[4]).trim()),ic=identity?.ic||rawIC,model=identity?.model||rawModel;
   const incomplete=identity?identity.pending:!ic||!model;if(!rawIC||!rawModel){missingProductRows++;if(includeDetail)pendingRows.push(row);else{const key=JSON.stringify([row[2],rawIC,rawModel]),group=pendingGroups.get(key)||[row[2],rawIC,rawModel,0];group[3]++;pendingGroups.set(key,group);}}
   const product=identity?.id||JSON.stringify([ic,model]),process=canonical(row[0]),key=JSON.stringify([product,value.day,process]);
   products.set(product,{ic:ic||'【待補 IC】',model:model||'【待補機種】',incomplete});processes.add(process);
