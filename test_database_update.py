@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from openpyxl import Workbook
 import autoreport as a
 
@@ -13,13 +14,14 @@ update = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(update)
 
 
-def workbook(extra=False, missing=False):
+def workbook(extra=False, missing=False, first_order='ORDER0'):
     book = Workbook()
     book.remove(book.active)
     for i, name in enumerate(a.REFERENCE_SHEETS[:-1] if missing else a.REFERENCE_SHEETS):
         sheet = book.create_sheet(name)
         sheet.append(['機種', 'IC', '料號', '工單'])
-        sheet.append([f'Model{i}', 'Goodix', f'PART{i}', f'ORDER{i}'])
+        order = f'ORDER{i}' if i else first_order
+        sheet.append([f'Model{i}', 'Goodix', f'PART{i}', order])
         if extra:
             sheet.append([f'New{i}', 'Elan', f'NEWPART{i}', f'NEWORDER{i}'])
     payload = io.BytesIO()
@@ -65,6 +67,53 @@ class DatabaseUpdateTests(unittest.TestCase):
         self.assertTrue(update.append_excel(self.db, self.excel, self.metadata)['unchanged'])
         self.assertEqual(before, self.db.read_bytes())
         self.assertFalse(self.metadata.exists())
+
+    def test_reupload_same_legacy_workbook_adds_secondary_order_alias(self):
+        payload = workbook(first_order='ORDER0\nSAP:ALIAS0')
+        scope = json.dumps([a.norm(name) for name in a.REFERENCE_SHEETS], ensure_ascii=False)
+        legacy_digest = hashlib.sha256(payload + ('scope-v3-first-entry:' + scope).encode()).hexdigest()
+        with a.connect(self.db) as db:
+            db.execute('UPDATE sources SET sha256=?', (legacy_digest,))
+        update.save_corrections(self.db, [{'order': 'ORDER0', 'ic': 'Elan', 'model': 'New Model'}])
+        self.excel.write_bytes(payload)
+        result = update.append_excel(self.db, self.excel, self.metadata)
+        self.assertEqual(result['added_records'], 1)
+        self.assertEqual(result['skipped_records'], 4)
+        with a.connect(self.db) as db:
+            for order in ('ORDER0', 'ALIAS0'):
+                match = a.lookup(db, [('order', order)])
+                self.assertEqual(match['狀態'], '唯一匹配')
+                self.assertEqual(match['候選'][0]['機種'], 'Model0')
+            self.assertEqual(update.confirmed_corrections(db)[0]['model'], 'New Model')
+        self.assertTrue(update.append_excel(self.db, self.excel, self.metadata)['unchanged'])
+
+    def test_reupload_v4_workbook_adds_decoded_order_alias(self):
+        order_cell = '~~C520-251200017~~<br>~~&#32;   &#32;~~&#x43;520-260100002'
+        payload = workbook(first_order=order_cell)
+        scope = json.dumps([a.norm(name) for name in a.REFERENCE_SHEETS], ensure_ascii=False)
+        prior_digest = hashlib.sha256(payload + ('scope-v4-all-orders:' + scope).encode()).hexdigest()
+        current_parser = a.order_numbers
+
+        def prior_parser(value, labeled=True):
+            if value == order_cell:
+                return ['C520-251200017', '260100002']
+            return current_parser(value, labeled=labeled)
+
+        with a.connect(self.db) as db, patch.object(a, 'order_numbers', side_effect=prior_parser):
+            imported = a.import_excel(db, payload, 'original.xlsx')
+            db.execute('UPDATE sources SET sha256=? WHERE id=?', (prior_digest, imported['source_id']))
+            self.assertEqual(a.lookup(db, [('order', 'C520-260100002')])['狀態'], '查無資料')
+
+        self.excel.write_bytes(payload)
+        result = update.append_excel(self.db, self.excel, self.metadata)
+        self.assertEqual(result['added_records'], 1)
+        self.assertEqual(result['skipped_records'], 4)
+        with a.connect(self.db) as db:
+            for order in ('C520-251200017', 'C520-260100002'):
+                match = a.lookup(db, [('order', order)])
+                self.assertEqual(match['狀態'], '唯一匹配')
+                self.assertEqual(match['候選'][0]['機種'], 'Model0')
+        self.assertTrue(update.append_excel(self.db, self.excel, self.metadata)['unchanged'])
 
     def test_invalid_or_missing_sheets_leave_database_intact(self):
         before = hashlib.sha256(self.db.read_bytes()).digest()

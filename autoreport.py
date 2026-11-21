@@ -11,6 +11,7 @@ import sqlite3
 import unicodedata
 import warnings
 from datetime import date, datetime
+from html import unescape
 from pathlib import Path
 from xml.etree import ElementTree as ET
 from zipfile import ZipFile
@@ -25,14 +26,19 @@ DEFAULT_DB = ROOT / 'data' / 'autoreport.sqlite3'
 CC = OpenCC('t2s')
 NS = {'m': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
 REFERENCE_SHEETS = ('工單（A16）', 'CY26', '工單（CY24&25）', '重工工單1', 'NPI')
-ORDER_PATTERN = re.compile(r'(?<![A-Z0-9])(?:[A-Z]\d{3}-\d{6,12}|\d{9})(?![A-Z0-9])', re.I)
+ORDER_PATTERN = re.compile(r'(?<![A-Z0-9])(?:[A-Z]\d{3}-\d{6,12}|\d{9})(?![A-Z0-9])', re.I | re.ASCII)
+ORDER_ENTITY = re.compile(r'&(?:#(?:[0-9]{1,10}|x[0-9a-f]{1,8})|nbsp);', re.I)
+ORDER_STRIKE_TAG = re.compile(r'</?(?:s|del|strike)(?=\s|/?>)[^<>]*>', re.I)
+ORDER_SEPARATOR = re.compile(r'<br\s*/?\s*>|[\r\n;；、,，\\]+', re.I)
+LEGACY_ORDER_PATTERN = re.compile(r'(?:SAP\s*:\s*)?([A-Z]{2,}[-_]?[0-9]+)')
+DASH_VARIANTS = str.maketrans({'–': '-', '—': '-', '−': '-'})
 PART_PATTERN = re.compile(r'(?<!\d)\d{8}-\d{3}(?!\d)')
 
 
 def norm(value):
     """Traditional/simplified, width, case, whitespace, and common dash variants."""
     value = unicodedata.normalize('NFKC', str(value or ''))
-    value = value.translate(str.maketrans({'–': '-', '—': '-', '−': '-'}))
+    value = value.translate(DASH_VARIANTS)
     return re.sub(r'\s+', '', CC.convert(value).casefold())
 
 
@@ -56,14 +62,20 @@ def first_text(value):
 
 
 def order_numbers(value, labeled=True):
-    value = unicodedata.normalize('NFKC', first_text(value)).upper()
-    found = ORDER_PATTERN.findall(value)
-    if found:
-        return found[:1]
-    # Other installations may use IDs like WO001. C531 alone is only a stage prefix.
-    if labeled and re.fullmatch(r'[A-Z]{2,}[-_]?[0-9]+', value):
-        return [value]
-    return []
+    decoded = ORDER_ENTITY.sub(lambda match: unescape(match[0].lower()), text(value))
+    plain = ORDER_STRIKE_TAG.sub('', decoded).replace('~~', '')
+    value = unicodedata.normalize('NFKC', plain).translate(DASH_VARIANTS).upper()
+    numbers = []
+    for entry in ORDER_SEPARATOR.split(value):
+        found = ORDER_PATTERN.findall(entry)
+        if found:
+            numbers.extend(found)
+        elif labeled:
+            # Other installations may use IDs like WO001. C531 alone is only a stage prefix.
+            legacy = LEGACY_ORDER_PATTERN.fullmatch(entry.strip())
+            if legacy:
+                numbers.append(legacy[1])
+    return list(dict.fromkeys(numbers))
 
 
 def split_values(value):
@@ -242,7 +254,7 @@ def connect(path=DEFAULT_DB):
 def import_excel(db, payload, filename, sheet_names=REFERENCE_SHEETS):
     # Import identity includes the selected names and parsing rules.
     scope = json.dumps([norm(v) for v in sheet_names], ensure_ascii=False)
-    digest = hashlib.sha256(payload + ('scope-v3-first-entry:' + scope).encode()).hexdigest()
+    digest = hashlib.sha256(payload + ('scope-v5-decoded-orders:' + scope).encode()).hexdigest()
     previous = db.execute('SELECT id FROM sources WHERE sha256=?', (digest,)).fetchone()
     if previous:
         return {'duplicate': True, 'source_id': previous['id']}
@@ -417,19 +429,22 @@ def direct_ids(db, kind, value):
 def lookup(db, criteria):
     """Intersect distinct model/IC pairs; never choose the first ambiguous hit.
 
+    An explicit work order takes precedence over a supplied part number.
     Orders without model/IC may resolve through exact part/DPN relations.
     Revision suffixes are preserved; fuzzy text search never auto-fills a result.
     """
-    expanded_criteria = []
-    for kind, value in criteria:
-        value = first_text(value)
-        numbers = order_numbers(value) if kind in ('order', 'any') else []
-        expanded_criteria.extend([(kind, number) for number in numbers] if numbers else [(kind, value)])
+    criteria = list(criteria)
+    has_order = any(kind == 'order' and norm(first_text(value)) for kind, value in criteria)
+    # Each order in one field is an alternative; separate fields remain constraints.
     sets, all_candidates, evidence, resolved_criteria = [], {}, {}, []
-    for kind, value in expanded_criteria:
-        if not norm(value):
+    for kind, value in criteria:
+        if has_order and kind == 'part':
             continue
-        ids = direct_ids(db, kind, value)
+        numbers = order_numbers(value) if kind in ('order', 'any') else []
+        values = numbers or [first_text(value)]
+        if not norm(values[0]):
+            continue
+        ids = {record_id for item in values for record_id in direct_ids(db, kind, item)}
         linked = set(ids)
         for record_id in ids:
             rec = db.execute('SELECT * FROM records WHERE id=?', (record_id,)).fetchone()
@@ -456,7 +471,7 @@ def lookup(db, criteria):
         if any(ic for _, ic in pairs):
             pairs = {p for p in pairs if p[1]}
         sets.append(pairs)
-        resolved_criteria.append({'欄位類別': kind, '查找值': str(value), '找到候選組數': len(pairs)})
+        resolved_criteria.append({'欄位類別': kind, '查找值': '\n'.join(values), '找到候選組數': len(pairs)})
         for record_id in sorted(ids):
             rec = db.execute(RECORD_SQL + ' WHERE r.id=?', (record_id,)).fetchone()
             evidence[record_id] = {'檔案': rec['source_file'], '分頁': rec['sheet'], '列號': rec['row_number']}

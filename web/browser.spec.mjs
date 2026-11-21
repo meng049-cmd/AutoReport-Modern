@@ -28,7 +28,6 @@ test('Pages project path loads; browser uploads Excel/CSV and downloads a real w
   });
   await page.goto(process.env.LIVE_SITE_URL || `http://127.0.0.1:${server.address().port}/AutoReport/`);
   await page.waitForFunction(()=>!document.querySelector('#match').disabled);
-  assert.equal(await page.locator('#orderCount').innerText(),'0');
   await showView(page,'#matching');await page.locator('#query').fill('C515-250300004');await page.locator('#lookup').click();
   await page.locator('#searchResults').getByText('查無資料').waitFor();
   const referenceBook=new ExcelJS.Workbook();

@@ -27,7 +27,10 @@ test('updated reference database works in the browser and preserves Detail downl
   await page.route('https://api.github.com/**',route=>listUnavailable?route.fulfill({status:403,body:'rate limit'}):route.fulfill({json:{truncated:false,tree:[{type:'blob',path:'database-inputs/原始對照.xlsx',size:1024},{type:'blob',path:'database-inputs/README.md',size:300}]}}));
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
   await page.waitForFunction(()=>!document.querySelector('#match').disabled);
-  assert.equal(await page.locator('#orderCount').innerText(),data.stats['不重複工單'].toLocaleString('en-US'));
+  await page.locator('#kind').selectOption('order');
+  await page.locator('#query').fill(order);
+  await page.locator('#lookup').click();
+  await page.locator('#searchResults').getByText(expected['狀態'],{exact:true}).waitFor();
   assert.equal(await page.locator('#databaseUpload').getAttribute('href'),null);
   assert.equal(await page.locator('#databaseFile').count(),1);
   assert.equal(await page.locator('#databaseDownload').count(),1);

@@ -34,3 +34,16 @@ test('only exact order/part matches fill missing identities; complete and confli
  for(const id of ['other-part','other-order','blank-order','conflict'])assert.equal(rows.get(id)[10],'');
  assert.equal(rows.get('complete')[9],'Other');assert.equal(rows.get('complete')[10],'Other Model');
 });
+
+test('a confirmed multi-order correction applies to the same set and part',()=>{
+ const first='C520-260600014',second='C520-260700009',third='C520-626070046';
+ const decorated='~~'+first+'~~<br>'+second+'\nSAP: '+third;
+ const html='<s class="deleted">&#67;520-260600014</s><BR / ><del>C520&#x2d;260700009</del><br>SAP:&nbsp;<strike>'+third+'</strike>';
+ const reordered=[third,second,first,first].join('\n');
+ const order=[first,second,third].join('|').toLowerCase();
+ const merger=mergerFor([row('decorated',decorated),row('html',html),row('reordered',reordered),row('single',first),row('subset',first+'\n'+second),row('other-part',decorated,'PART2'),row('invalid','&#1114112;<br>&#xD800;')]);
+ assert.equal(applyConfirmedProductCorrections(merger,[{...correction,order}]),3);
+ const rows=new Map([...merger.rows.values()].map(value=>[value.row[4],value.row]));
+ for(const id of ['decorated','html','reordered'])assert.equal(rows.get(id)[10],'Model A');
+ for(const id of ['single','subset','other-part','invalid'])assert.equal(rows.get(id)[10],'');
+});

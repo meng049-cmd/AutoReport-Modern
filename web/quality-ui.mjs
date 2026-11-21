@@ -1,5 +1,5 @@
 import {productStageSeries,stageChartDateLabel} from './stage-product-series.mjs';
-import {restrictChartAnalysis} from './stage-metrics.mjs';
+import {restrictChartAnalysis,stageProcesses} from './stage-metrics.mjs';
 import {navigate} from './navigation.mjs';
 import {renderQualityExtras,syncChartDateUnits,chartDateUnitLabel} from './quality-extras.mjs';
 import {createStageChartWorkbook} from './chart-export.mjs';
@@ -242,12 +242,59 @@ function renderDefects(){
  if(axisOrder().every(key=>filters[key])){const leaf=document.createElement('div');leaf.className='defect-leaf';const label=document.createElement('strong');label.textContent=defectFilterLabel(filters.defect)+' · '+view.count+' PPID';leaf.append(label,document.createTextNode('　'),button('查看 PPID 明細',()=>openDetails('ppid')),button('查看工單',()=>openDetails('order')));$('defectLevels').append(leaf);}
  $('defectOpen').disabled=!view.count;$('defectOrders').disabled=!view.count;$('defectEmpty').hidden=Boolean(view.input||view.count);
 }
+function renderYieldOverview() {
+ const dates = dateRange();
+ const scope = {startDate: filters.startDate, endDate: filters.endDate, days: filters.days};
+ const processes = new Map(stageProcesses().map(name => [name, []]));
+ const daily = new Map(dates.map(date => [date, []]));
+ const models = new Map();
+ const modelNames = new Map(analysis.products.map(product => [product.id, product.model?.trim()]));
+ for (const row of filteredObservations(analysis, scope)) {
+  processes.get(row.process).push(row);
+  daily.get(row.date)?.push(row);
+  const name = modelNames.get(row.product) || '待補機種';
+  if (!models.has(name)) models.set(name, []);
+  models.get(name).push(row);
+ }
+
+ renderYieldCards('yieldOverviewProcesses', processes);
+ renderYieldCards('yieldOverviewDays', daily);
+ renderYieldCards('yieldOverviewModels', [...models].sort(([a], [b]) => a.localeCompare(b, 'zh-TW')));
+}
+
+function renderYieldCards(id, groups) {
+ const cards = document.createDocumentFragment();
+ for (const [name, observations] of groups) {
+  const {total, yield: rate} = scopedQualitySummary({observations});
+  const card = document.createElement('dl');
+  card.className = 'yield-stat';
+  const label = document.createElement('dt');
+  label.textContent = name;
+  const values = document.createElement('dd');
+  const percentage = document.createElement('strong');
+  percentage.textContent = pct(rate);
+  const input = document.createElement('span');
+  input.textContent = '投入 ' + total.toLocaleString() + ' PPID';
+  values.append(percentage, input);
+  card.append(label, values);
+  cards.append(card);
+ }
+ if (!cards.hasChildNodes()) {
+  const empty = document.createElement('p');
+  empty.className = 'yield-stat-empty';
+  empty.textContent = '選定範圍內沒有資料';
+  cards.append(empty);
+ }
+ $(id).replaceChildren(cards);
+}
+
 function render(){
  if(!analysis)return;const summary=scopedQualitySummary(analysis,{...baseFilters(),product:filters.product,order:filters.order,process:filters.process});
  metrics('qualityMetrics',[['區間投入 PPID',summary.total.toLocaleString()],['區間唯一 PPID 良率',pct(summary.yield)],['區間不良 PPID',summary.fail.toLocaleString()],['區間唯一 PPID 不良率',pct(summary.badRate)]]);
  $('qualitySkipped').hidden=!analysis.skippedRows?.length;$('qualitySkipped').textContent=analysis.skippedRows?.length?'測試模式結果：已略過 '+analysis.skippedRows.length+' 列錯誤資料，詳見下載報表「略過錯誤明細」。':'';
  const conflicts=analysis.identityConflicts||[],notice=$('qualityProductConflictWarning');notice.hidden=!conflicts.length;notice.replaceChildren();
  if(conflicts.length){const message=document.createElement('span'),button=document.createElement('button');message.textContent=`發現 ${conflicts.length} 個 PPID 有不同的 IC／機種對照，已暫列待補產品，不會猜測機種。請查閱完整分析報表「PPID對照衝突」工作表，到 Raw Data 原始檔案庫一次選取相關原始檔進行比對，系統會將衝突列轉入手動補填。`;button.type='button';button.className='secondary';button.textContent='前往 Raw Data 原始檔案庫';button.onclick=()=>navigate('raw');notice.append(message,button);}
+ renderYieldOverview();
  $('qualityPeriod').textContent=filters.days?.length?'複選日期：'+filters.days.join('、'):filters.startDate+' — '+filters.endDate;renderDateTable();renderDefects();renderQualityExtras(analysis,filters,order=>setFilter('order',order));for(const stage of stages){drawStageChart(stage);$('summary-'+stage.key).textContent='期間製程平均 '+pct(stageModel(stage.key).period.value)+' · 唯一PPID '+pct(stageModel(stage.key).period.uniqueYield)+' · 目標 '+pct(stage.target)+' · 期間唯一投入 '+stageModel(stage.key).period.input+(stageModel(stage.key).comparisonNote?' · '+stageModel(stage.key).comparisonNote:'');renderStageDrill(stage);}
  renderedWidth=$('qualityDashboard').clientWidth;
 }

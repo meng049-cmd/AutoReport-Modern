@@ -6,7 +6,7 @@ import {addLibraryFile,listLibraryFiles,clearFileLibrary,beginFileOperation,endF
 import JSZip from 'jszip';
 import ExcelJS from 'exceljs';
 import {setReferenceSources} from './report-context.mjs';
-import {correctionOrder,norm} from './matcher.mjs';
+import {correctionOrder,norm,orderCriterionKey,orderNumbers} from './matcher.mjs';
 import {canonicalCorrectionName} from './match-corrections.mjs';
 import {invalidateProductAnalysisCaches} from './analysis-cache.mjs';
 const $=id=>document.getElementById(id);
@@ -78,7 +78,8 @@ function renderMatchCorrections(){
   const index=offset+position,value=correctionDrafts.get(group.key)||batchCorrections.get(group.key)||{};
   const serials=[...(group.conflictPPIDs||[])];
   const mappings=[...(group.conflictMappings||[])];
-  return [esc(group.order||'未提供工單'),esc(group.part||(!group.order?group.query:'')||'—'),[...group.files].map(esc).join('<br>'),String(group.rows),[...group.statuses].map(esc).join('<br>'),serials.length?esc(serials.slice(0,8).join('、'))+(serials.length>8?`<br>另 ${serials.length-8} 個`:''):'—',mappings.length?mappings.map(esc).join('<br>'):'—',renderCorrectionField('ic',index,value),renderCorrectionField('model',index,value)];
+  const orders=(group.order||'未提供工單').split('\n').map(esc).join('<br>');
+  return [orders,esc(group.part||(!group.order?group.query:'')||'—'),[...group.files].map(esc).join('<br>'),String(group.rows),[...group.statuses].map(esc).join('<br>'),serials.length?esc(serials.slice(0,8).join('、'))+(serials.length>8?`<br>另 ${serials.length-8} 個`:''):'—',mappings.length?mappings.map(esc).join('<br>'):'—',renderCorrectionField('ic',index,value),renderCorrectionField('model',index,value)];
  }));
 }
 
@@ -163,7 +164,7 @@ $('matchConfirmDatabase').onclick=async()=>{
  const applied=[...batchCorrections.values()];
  if(!applied.length){$('matchCorrectionSaveStatus').textContent='請先套用 IC／機種並重新產生結果，再確認保存。';return;}
  for(const [key,draft] of correctionDrafts){const value=batchCorrections.get(key);if(!value||canonicalCorrectionName(draft.ic,matchOptions.ics)!==value.ic||canonicalCorrectionName(draft.model,matchOptions.models)!==value.model){$('matchCorrectionSaveStatus').textContent='有尚未套用的補填，請先重新產生結果再保存。';return;}}
- const items=applied.map(value=>{const group=correctionGroups.get(value.key);return {...value,order:correctionOrder(group?.order||''),part:group?.part||''};});
+ const items=applied.map(value=>{const group=correctionGroups.get(value.key);return {...value,order:orderCriterionKey(group?.order||''),part:group?.part||''};});
  if(items.some(item=>!item.order)){$('matchCorrectionSaveStatus').textContent='缺少工單的補填無法保存為長期對照，請確認原始工單欄位。';return;}
  if(!beginFileOperation())return;
  $('matchCorrectionFields').disabled=true;
@@ -228,11 +229,16 @@ function setOptions(id,values=[]){
  for(const value of values)options.append(new Option(value,value));
  list.replaceChildren(options);
 }
-function applyDatabaseStats(s){matchOptions=s.correctionOptions||{ics:[],models:[],families:[]};setOptions('editICs',matchOptions.ics);setOptions('editModels',matchOptions.models);setOptions('editFamilies',matchOptions.families);setOptions('editOrders',s.orders);$('saveOrderCorrection').disabled=false;uploadedFiles=s.uploaded_files||[];sourceFiles=s.source_files||[];setReferenceSources([...sourceFiles,...uploadedFiles.map(file=>file.name)]);filesReady=true;renderUploadedFiles();renderUploadedFilesStatus();$('databaseMetrics').hidden=!s['索引資料列'];if(!s['索引資料列']){$('query').value='';$('uploadedFileFilter').value='';for(const input of document.querySelectorAll('input[type=file]'))input.value='';}if(s.cleared_at&&!s['索引資料列'])$('databaseStatus').textContent='已清空本瀏覽器資料庫。所有資料與匯入清單已移除，可重新上傳。';$('sheetCount').textContent=new Set(s['分頁'].map(r=>r.name)).size;const update=s.database_update;$('databaseUpdated').textContent=update?.updated_at?'資料更新時間：'+new Date(update.updated_at).toLocaleString('zh-TW',{timeZone:'Asia/Taipei'})+'（台北時間） · 最近新增 '+update.added_records+' 筆、跳過重複 '+update.skipped_records+' 筆':(s['索引資料列']?'目前使用既有對照資料；尚無透過新上傳流程更新的紀錄。':'資料庫目前為空，請上傳原始對照 Excel。');if(s.confirmedCorrectionCount)$('databaseUpdated').textContent+=` · 已確認補填 ${s.confirmedCorrectionCount} 組`;$('orderCount').textContent=s['不重複工單'].toLocaleString();$('pairCount').textContent=s['機種IC組合'];$('sources').innerHTML=s['分頁'].length?table(['分頁','表頭列','原始非空資料列','可查找列'],s['分頁'].map(r=>[esc(r.name),r.header_row??'未標示',r.raw_rows,r.indexed_rows])):'';for(const id of ['lookup','match','fulltext','databaseUpload','databaseClear'])$(id).disabled=false;$('message').textContent='對照資料已載入，可以查找或上傳檔案。';}
+function applyDatabaseStats(s){matchOptions=s.correctionOptions||{ics:[],models:[],families:[]};setOptions('editICs',matchOptions.ics);setOptions('editModels',matchOptions.models);setOptions('editFamilies',matchOptions.families);setOptions('editOrders',s.orders);$('saveOrderCorrection').disabled=false;uploadedFiles=s.uploaded_files||[];sourceFiles=s.source_files||[];setReferenceSources([...sourceFiles,...uploadedFiles.map(file=>file.name)]);filesReady=true;renderUploadedFiles();renderUploadedFilesStatus();if(!s['索引資料列']){$('query').value='';$('uploadedFileFilter').value='';for(const input of document.querySelectorAll('input[type=file]'))input.value='';}if(s.cleared_at&&!s['索引資料列'])$('databaseStatus').textContent='已清空本瀏覽器資料庫。所有資料與匯入清單已移除，可重新上傳。';const update=s.database_update;$('databaseUpdated').textContent=update?.updated_at?'資料更新時間：'+new Date(update.updated_at).toLocaleString('zh-TW',{timeZone:'Asia/Taipei'})+'（台北時間） · 最近新增 '+update.added_records+' 筆、跳過重複 '+update.skipped_records+' 筆':(s['索引資料列']?'目前使用既有對照資料；尚無透過新上傳流程更新的紀錄。':'資料庫目前為空，請上傳原始對照 Excel。');if(s.confirmedCorrectionCount)$('databaseUpdated').textContent+=` · 已確認補填 ${s.confirmedCorrectionCount} 組`;$('sources').innerHTML=s['分頁'].length?table(['分頁','表頭列','原始非空資料列','可查找列'],s['分頁'].map(r=>[esc(r.name),r.header_row??'未標示',r.raw_rows,r.indexed_rows])):'';for(const id of ['lookup','match','fulltext','databaseUpload','databaseClear'])$(id).disabled=false;$('message').textContent='對照資料已載入，可以查找或上傳檔案。';}
 call('stats').then(applyDatabaseStats).catch(error);
 let orderRequest=0;
+function singleOrderForEdit(){
+ const value=$('editOrder').value,orders=orderNumbers(value.replace(/\|/g,'\n'));
+ if(orders.length>1){$('orderCorrectionStatus').textContent='每次請輸入一組工單號碼。';return null;}
+ return orders[0]||correctionOrder(value);
+}
 async function loadOrderCorrection({fill=false}={}){
- const order=correctionOrder($('editOrder').value),part=$('editPart').value.trim(),request=++orderRequest;
+ const order=singleOrderForEdit(),part=$('editPart').value.trim(),request=++orderRequest;
  const status=$('orderCorrectionStatus');
  if(!order){setOptions('editParts');return;}
  try{
@@ -256,7 +262,8 @@ $('editPart').onchange=()=>{orderRequest++;};
 $('loadOrderCorrection').onclick=()=>loadOrderCorrection({fill:true});
 $('orderCorrectionForm').onsubmit=async event=>{
  event.preventDefault();
- const order=correctionOrder($('editOrder').value),part=$('editPart').value.trim();
+ const order=singleOrderForEdit(),part=$('editPart').value.trim();
+ if(order===null)return;
  const ic=canonicalCorrectionName($('editIC').value,matchOptions.ics),model=canonicalCorrectionName($('editModel').value,matchOptions.models),family=canonicalCorrectionName($('editFamily').value,matchOptions.families);
  const status=$('orderCorrectionStatus');
  if(!order||!ic||!model){status.textContent='請填寫工單、IC 與機種。';return;}

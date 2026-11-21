@@ -1,4 +1,4 @@
-import {norm,text} from './matcher.mjs';
+import {correctionPart,firstText,norm,orderCriterionKey,text} from './matcher.mjs';
 
 export function correctionOptions(records=[],{includeFamily=false}={}){
  const collect=field=>{
@@ -38,8 +38,8 @@ function needsStageCorrection(row){
 function identity(result,row){
  const criteria=(row['查找條件']||[]).map(item=>[item['欄位類別'],text(item['查找值'])]).filter(([,value])=>value);
  const order=criteria.find(([kind])=>kind==='order')?.[1]||'';
- const part=criteria.find(([kind])=>kind==='part')?.[1]||'';
- const terms=order?[['order',norm(order)],...(part?[['part',norm(part)]]:[])]:criteria.map(([kind,value])=>[kind,norm(value)]).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
+ const part=firstText(row[correctionPart])||criteria.find(([kind])=>kind==='part')?.[1]||'';
+ const terms=order?[['order',orderCriterionKey(order)],...(part?[['part',norm(part)]]:[])]:criteria.map(([kind,value])=>[kind,norm(value)]).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
  // Rows without identifiers must never share a correction just because both are blank.
  const key=JSON.stringify(terms.length?terms:[['file',result['檔名']],['sheet',row['分頁']],['row',row['列號']]]);
  return {key,order,part,query:criteria.map(([,value])=>value).join('／')};
