@@ -1,38 +1,32 @@
-# AutoReport 專案交接給 ChatGPT
+# AutoReport Modern 專案交接
 
-請從目前 repository 接手，依使用者後續的網頁重作需求調整前端。先檢查現有程式和 Git 狀態，再提出精簡的視覺／互動方案並直接完成；保留已驗證的資料處理邏輯，除非使用者明確要求改計算規則。不要把瀏覽器本地資料誤當成伺服器資料。
+## 專案來源與目的
 
-## 專案狀態
+- Repository：meng049-cmd/AutoReport-Modern，主分支 main。
+- 以 meng049-cmd/AutoReport 的 main 程式快照為基礎建立獨立專案。
+- 新版目前僅完成介面主題調整，尚未部署；原正式網站不受影響。
+- 視覺方向參考 Kiranism shadcn dashboard starter；本專案沿用原生 ES module 架構，保留原本資料處理流程。
 
-- Repository：`meng049-cmd/AutoReport`，主分支 `main`。
-- 目前程式提交：以 `git log -1` 為準；本次完成精簡操作頁面、完整不良拆解與 Excel 原生圖表／圖像快照。
-- GitHub Pages 建置版本：`dist/index.html` 中 `assets/app.js?v=...` 的版本號。
-- 最新網站建置已部署，`git status` 在交接前為乾淨。
-- 專案是靜態瀏覽器應用，核心為 `web/index.html`、`web/app.mjs`、`web/merge-ui.mjs`、`web/yield-ui.mjs`、`web/quality-ui.mjs` 和根目錄的各 Worker／核心模組。
+## 修改範圍
 
-## 現有功能
+- web/modern-dashboard.css：新版 dashboard 主題。
+- web/index.html：載入新版樣式並更新頁面標題。
+- web/build.mjs：將樣式複製到靜態輸出，納入版本雜湊。
+- 其餘分析、檔案、Excel 與本機資料模組以原專案為準；除非使用者明確要求，請勿更改統計規則。
 
-- Excel／CSV 批次查詢；Detail 工作表使用 B 欄工單、C 欄料號查照，將 IC／機種寫入 J／K 欄。
-- 多份 Detail 可以按「一鍵比對、合併與分析」，自動比對、按網站規則合併去重、產出每日良率與不良分析，並下載最終 Excel。這條流程只顯示進度與最終下載連結，不顯示中間結果。
-- 原有單步比對、合併、良率分析按鈕仍保留。合併後 Detail 可單獨下載；良率 Excel 的 Detail 與計算明細維持隱藏。
-- 品質看板只提供前段、後段每日階段良率圖，SMT 原有報表算法保留；另有產品→日期→製程→不良項目→PPID的完整互動拆解，可篩選產品、點選日期讀取日別數值；每張圖可下載含可編輯原生 Excel 圖表、資料表、已產生圖表快照、統計說明及資料來源的 .xlsx。起訖日期之間的空白日期保留於圖表與資料工作表。
-- 可於本機瀏覽器追加／清空 SQLite 對照資料、下載 SQLite 備份。資料庫更新與匯入清單放在使用者瀏覽器儲存空間，不會同步到 GitHub 或其他瀏覽器。
+## 保留功能
 
-## 必須保留的商業規則
+- 工單／料號查找與批次比對、手動補填、PPID 查找。
+- 日／週／月良率與不良分析、品質看板、圖表與 Excel 匯出。
+- Raw Data、Detail、分析報告與歷史檔案庫。
+- 瀏覽器本機資料庫，以及手動匿名雲端備份。
 
-- 合併去重鍵為同日期＋製程＋PPID／小板序號；重複時 FAIL 整列優先，否則保留第一筆。不同日期或不同製程仍保留。
-- 良率以 GOOD／FAIL 計算；每日製程良率不變，前段、後段每日階段良率為當日有資料製程良率的算術平均。產品總良率按該產品有資料的日期×階段良率算術平均。
-- 不良率按不重複 PPID 計算。每個 PPID 的不良歸屬優先取輸入順序第一筆 FAIL；沒有 FAIL 才取第一筆帶不良項目的 GOOD。每個 PPID 跨日期、跨製程只歸屬一次；FAIL 即使沒有不良項目文字仍計為不良。
-- 最終報表保留「每日製程良率、每日階段良率、品質總覽、產品總良率、製程總良率、不良分析、PPID對照衝突、不良PPID明細、資料來源、統計說明」；若有缺漏才出現「待補產品資料」。彙總不良分析依日期／製程／產品／不良項目列投入數、不良數、項目不良率與對全產品不良率貢獻；原始 Detail、計算明細為隱藏工作表。
+## 建置
 
-## 驗證
+npm ci
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+npm run build
 
-- 單元測試：`npm test`（38 項）。
-- 建置：`npm run build`。
-- 瀏覽器測試：`node --test web/browser.spec.mjs`；本機瀏覽器整合測試曾通過，包含一鍵流程及可編輯 Excel 圖表下載。
-- 全部瀏覽器測試：`npm run test:browser`。
-- Pages 部署慣例：先測試與建置，再 `git push origin HEAD:main`，最後 `python web/publish_pages.py`；`python web/wait_pages.py` 會確認版本已上線。
+npm run build 會輸出至 dist/。正式 Vercel 部署設定請看 VERCEL_DEPLOYMENT.md。新版與原站分開部署；不要把原站部署資訊誤認為新版已上線。
 
-## 接續對話可以貼給 ChatGPT 的指令
-
-> 請接手 AutoReport 專案並依我接下來的需求重做網頁介面。先閱讀 repository 根目錄的 `CHATGPT_HANDOFF.md`、`web/index.html` 和相關 UI 模組，再直接修改、測試與建置。保留交接文件列出的計算規則、工作表和瀏覽器本機資料安全範圍。請先給我可預覽、可檢查的完成版本；除非我明確要求發布，先不要推送或部署。若要更換視覺方向，先依我提供的參考圖或描述執行，不要自行更改良率／不良率口徑。
