@@ -1,9 +1,19 @@
-# AutoReport 工單 IC／機種比對與品質分析
+# AutoReport Modern｜工單查找與品質分析
 
-本專案目前維護中的程式版本以 GitHub `main` 為準。正式網站：[AutoReport](https://auto-report-five.vercel.app/)。
+此專案是原有 [AutoReport](https://github.com/meng049-cmd/AutoReport) 的獨立新版，基於原專案 `main` 的 [407698e](https://github.com/meng049-cmd/AutoReport/commit/407698e360db26a8b771322fc9a9f0b73b2ec501) 程式快照，保留工單比對、良率與不良分析、PPID 查找、品質看板、檔案庫及本機／匿名雲端備份功能。新版採用較新的 shadcn dashboard 視覺方向：深色側邊導覽、簡潔工作區標題列、slate 卡片與藍色操作色；資料運算及原有頁面流程未改寫。
 
-- GitHub Pages 部署網址：[https://meng049-cmd.github.io/AutoReport/](https://meng049-cmd.github.io/AutoReport/)
-- 部署與登入設定：[Vercel 部署說明](VERCEL_DEPLOYMENT.md)
+新版視覺參考目前活躍維護的 [Kiranism shadcn dashboard starter](https://github.com/Kiranism/next-shadcn-dashboard-starter)（MIT、Next.js 16、Tailwind CSS v4）。此專案保留現有靜態 ES module 架構，採用其 dashboard 佈局與視覺規範，避免改寫既有分析流程。
+
+## 新版介面
+
+- 深色側邊導覽與頁面定位，手機版保留抽屜式導覽。
+- 精簡頂部標題列，統一分析卡片、表格、篩選器和操作按鈕樣式。
+- 保留原本的頁面路由、分析功能、Excel 匯出與檔案儲存流程。
+- 主題樣式位於 `web/modern-dashboard.css`；原有分析與檔案處理模組未改寫。
+
+本專案主分支 `main` 是新版原始碼；目前尚未部署新版。原正式網站仍由原始 AutoReport 專案提供：[AutoReport](https://auto-report-five.vercel.app/)。
+
+- 新版部署方式：[Vercel 部署說明](VERCEL_DEPLOYMENT.md)
 - 手動雲端同步設定：[雲端同步設定](CLOUD_SYNC.md)
 
 ## 系統用途與六個分析製程
