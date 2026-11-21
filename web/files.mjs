@@ -59,13 +59,20 @@ export async function matchFile(matcher,bytes,filename,{analysisOnly=false,force
   const detail=tables.find(t=>t.name==='Detail');
   if(!detail)return matchTables(matcher,tables,filename);
   if(analysisOnly&&(detail.raw[0]?.[0]!=='製程'||detail.raw[0]?.[4]!=='小板序號'||detail.raw[0]?.[5]!=='產出時間'||detail.raw[0]?.[8]!=='狀態'))throw Error('Detail 欄位須為 A製程、E小板序號、F產出時間、I狀態，請確認原始檔欄位。');
-  const results=[],lookups=new Map(),forcedCorrections=new Set(forceCorrectionKeys);
+  const results=[],partLookups=new Map(),orderLookups=new Map(),forcedCorrections=new Set(forceCorrectionKeys);
   for(let i=1;i<detail.raw.length;i++){
     const row=detail.raw[i]||[];if(!row.slice(0,9).some(Boolean))continue;
     if(row.slice(9,11).some(Boolean)||detail.existingMatchRows?.has(i))throw Error(`Detail 第 ${i+1} 列 J/K 已有資料，請先確認，避免覆蓋。`);
-    const part=detail.expanded[i][2];
+    const [,order,part]=detail.expanded[i];
     const criteria=part?[['part',part]]:[];
-    const key=JSON.stringify(criteria);if(!lookups.has(key))lookups.set(key,matcher.lookup(criteria));const match=lookups.get(key),unique=match['狀態']==='唯一匹配'?match['候選'][0]:{};
+    if(!partLookups.has(part))partLookups.set(part,matcher.lookup(criteria));
+    let match=partLookups.get(part);
+    if(match['狀態']!=='唯一匹配'&&order&&matcher.resolveDetailOrder){
+      const key=JSON.stringify([part,order]);
+      if(!orderLookups.has(key))orderLookups.set(key,matcher.resolveDetailOrder(part,order,match));
+      match=orderLookups.get(key);
+    }
+    const unique=match['狀態']==='唯一匹配'?match['候選'][0]:{};
     const original=detail.nativeRows.get(i);if(original){original[0]=globalThis.canonicalAnalysisProcess(original[0]);for(const c of [1,2])if(original[c]==null||original[c]==='')original[c]=detail.expanded[i][c]||null;}
     const resultRow={...(original?{compactValues:original}:{}),'分頁':'Detail','列號':i+1,'原始資料':row.slice(0,9),'機種':unique['機種']||'',IC:unique.IC||'',...match};
     if(match['狀態']==='唯一匹配'&&forcedCorrections.has(matchCorrectionIdentity({檔名:filename},resultRow).key)){
@@ -73,8 +80,8 @@ export async function matchFile(matcher,bytes,filename,{analysisOnly=false,force
     }
     results.push(resultRow);
   }
-  const exportHint=analysisOnly?'依 C 欄料號比對，只保留六個分析製程與 A–K 必要欄位，原始檔完整保留於 Raw Data 檔案庫。':'下載保留原檔，J 為 IC、K 為機種。未唯一匹配的 J/K 留白。';
-  return {'檔名':filename,'筆數':results.length,'提示':['Detail 依 C 欄料號比對 IC／機種。'+exportHint],'結果':results,...(analysisOnly?{compactDetail:true,excludedRows:detail.excludedRows}:{detailBytes:bytes})};
+  const exportHint=analysisOnly?'只保留六個分析製程與 A–K 必要欄位，原始檔完整保留於 Raw Data 檔案庫。':'下載保留原檔，J 為 IC、K 為機種。未唯一匹配的 J/K 留白。';
+  return {'檔名':filename,'筆數':results.length,'提示':['Detail 優先使用 C 欄料號。對照有歧義時，用 B 欄工單核對同一來源列；料號未收錄時，僅採用完整一致的工單對照。'+exportHint],'結果':results,...(analysisOnly?{compactDetail:true,excludedRows:detail.excludedRows}:{detailBytes:bytes})};
 }
 function exportAnalysisDetail(result){const rows=[['製程','工單','料號','品名規格','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種']];for(const r of result['結果'])rows.push([...r.compactValues,r.IC||'',r['機種']||'']);const book=XLSX.utils.book_new(),sheet=XLSX.utils.aoa_to_sheet(rows,{dense:true});for(let i=1;i<rows.length;i++)if(sheet[i]?.[5])sheet[i][5].z='yyyy-mm-dd hh:mm:ss';XLSX.utils.book_append_sheet(book,sheet,'Detail');book.Custprops={AutoReportSources:JSON.stringify([result['檔名']]).replace(/[^\x00-\x7f]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0')),AutoReportDetailPolicy:'six-processes-v1'};return new Uint8Array(XLSX.write(book,{type:'array',bookType:'xlsx',compression:true}));}
 export async function exportMatches(result){

@@ -41,18 +41,19 @@ test('only exact part criteria identify products',()=>{
  assert.equal(matcher.lookup([['any','98000430-101'],['part','98000320-107']])['候選'][0]['機種'],'Test Model');
 });
 
-test('Detail matches column C regardless of column B and leaves unresolved J/K blank',async()=>{
+test('Detail prefers column C and leaves unsupported candidates blank',async()=>{
  const workbook=new ExcelJS.Workbook();
  workbook.addWorksheet('Detail').addRows([
   ['製程','工單','料號'],
   ['DAF外觀','UNRELATED','98000320-107'],
   ['DAF外觀','C515-250300004','98000430-101'],
-  ['DAF外觀','C515-250300004','']
+  ['DAF外觀','C515-250300004',''],
+  ['DAF外觀','UNKNOWN1','']
  ]);
  const detail=await matchFile(matcher,await workbook.xlsx.writeBuffer(),'detail.xlsx');
- assert.deepEqual(detail['結果'].map(row=>row['狀態']),['唯一匹配','多組候選','缺少查找欄位']);
- assert.deepEqual(detail['結果'].map(row=>row['機種']),['Test Model','','']);
- assert.deepEqual(detail['結果'].map(row=>row['原始資料'][1]),['UNRELATED','C515-250300004','C515-250300004']);
+ assert.deepEqual(detail['結果'].map(row=>row['狀態']),['唯一匹配','多組候選','唯一匹配','缺少查找欄位']);
+ assert.deepEqual(detail['結果'].map(row=>row['機種']),['Test Model','','Test Model','']);
+ assert.deepEqual(detail['結果'].map(row=>row['原始資料'][1]),['UNRELATED','C515-250300004','C515-250300004','UNKNOWN1']);
 });
 
 test('all query worksheets, merged parts and cached formula results, no formula execution',async()=>{
@@ -78,4 +79,29 @@ test('wide and sparse worksheets retain populated cells beyond 512 columns witho
 
 test('CSV matching supports more than 100000 rows and 512 columns',async()=>{
  const rows='料號'+','.repeat(599)+'備註\n'+'ORDER1'+','.repeat(599)+'尾欄\n'+('ORDER1\n').repeat(100004);let calls=0;const result=await matchFile({lookup(){calls++;return {'狀態':'查無資料','候選':[]};}},new TextEncoder().encode(rows),'large.csv');assert.equal(result['筆數'],100005);assert.equal(calls,1);assert.equal(result['結果'].at(-1)['列號'],100006);
+});
+
+test('Detail uses exact work-order evidence only when the part lookup is insufficient',async()=>{
+ const reference=new Matcher({records,keys:[
+  ...keys,
+  ['order','wo1',1],['order','wo2',2],['order','wo3',3],
+  ['order','wo4',2],['order','wo4',3]
+ ]});
+ const book=new ExcelJS.Workbook();
+ book.addWorksheet('Detail').addRows([
+  ['製程','工單','料號'],
+  ['DAF外觀','WO2','98000320-107'],
+  ['DAF外觀','WO2','98000430-101'],
+  ['DAF外觀','~~WO1~~','93000257-107'],
+  ['DAF外觀','WO1','98000430-101'],
+  ['DAF外觀','WO4','93000257-107'],
+  ['DAF外觀','WO2<br>WO3','98000430-101']
+ ]);
+ const {結果:rows}=await matchFile(reference,await book.xlsx.writeBuffer(),'detail.xlsx');
+ assert.deepEqual(rows.map(row=>row['狀態']),['唯一匹配','唯一匹配','唯一匹配','多組候選','查無資料','多組候選']);
+ assert.deepEqual(rows.map(row=>row.IC),['Goodix','Goodix','Goodix','','','']);
+ assert.deepEqual(rows[0]['查找條件'].map(term=>term['欄位類別']),['part']);
+ assert.deepEqual(rows[1]['查找條件'].map(term=>term['欄位類別']),['part','order']);
+ assert.equal(rows[2]['原始資料'][1],'~~WO1~~');
+ assert.equal(reference.lookup([['order','WO1']])['狀態'],'缺少查找欄位');
 });

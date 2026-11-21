@@ -4,6 +4,25 @@ export const text = v => v == null ? '' : String(v).trim();
 export const norm = v => convert(text(v).normalize('NFKC').replace(/[–—−]/g,'-')).toLowerCase().replace(/\s+/g,'');
 export const firstText = v => text(v).split(/[\r\n;；、]+/).find(s=>s.trim())?.trim() || '';
 const available = v => !['','-','n/a','na','none','无','未知'].includes(norm(v));
+function orderNumbers(value){
+  const decoded=text(value).replace(/&#(x[0-9a-f]+|[0-9]+);|&nbsp;/gi,(entity,number)=>{
+    if(!number)return ' ';
+    const point=Number(number.replace(/^x/i,'0x'));
+    if(point>0x10ffff||(point>=0xd800&&point<=0xdfff))return entity;
+    return String.fromCodePoint(point);
+  }).replace(/<\/?(?:s|del|strike)\b[^>]*>|~~/gi,'');
+  const normalized=decoded.normalize('NFKC').replace(/[–—−]/g,'-').toUpperCase();
+  const orders=new Set();
+  for(const segment of normalized.split(/<br\s*\/?\s*>|[\r\n;,、\\]+/i)){
+    const numbers=segment.match(/(?<![A-Z0-9])(?:[A-Z]\d{3}-\d{6,12}|\d{9})(?![A-Z0-9])/g);
+    if(numbers)for(const number of numbers)orders.add(number);
+    else{
+      const order=segment.trim().replace(/^SAP\s*:\s*/,'').trim();
+      if(/^[A-Z]{2,}[-_]?[0-9]+$/.test(order))orders.add(order);
+    }
+  }
+  return [...orders];
+}
 function correctionCandidate(saved){
   return {'機種':saved.model,IC:saved.ic,'產品系列':saved.family?[saved.family]:[],'來源':[{'檔案':'已確認補填對照','分頁':'料號 IC／機種補填','列號':1,'整理依據':['確認時間：'+saved.confirmed_at]}]};
 }
@@ -16,11 +35,12 @@ export function role(v){
 }
 export class Matcher {
   constructor(data){
-    this.data=data;this.records=new Map(data.records.map(r=>[r.id,r]));this.keys=new Map();
+    this.data=data;this.records=new Map(data.records.map(r=>[r.id,r]));this.keys=new Map();this.orderKeys=new Map();
     for(const [kind,value,id] of data.keys){
-      if(kind!=='part')continue;
-      if(!this.keys.has(value))this.keys.set(value,new Set());
-      this.keys.get(value).add(id);
+      if(kind!=='part'&&kind!=='order')continue;
+      const index=kind==='part'?this.keys:this.orderKeys;
+      if(!index.has(value))index.set(value,new Set());
+      index.get(value).add(id);
     }
   }
   ids(value){return this.keys.get(norm(value))||new Set();}
@@ -85,6 +105,25 @@ export class Matcher {
     const candidates=intersection.map(p=>{const c=all.get(p);return {'機種':c['機種'],IC:c.IC,'產品系列':[...c['產品系列']].sort(),'來源':[...c['來源'].values()]};});
     const status=!sets.length?'缺少查找欄位':!intersection.length?(sets.length>1&&sets.some(s=>s.size)?'條件不一致':'查無資料'):candidates.length>1?'多組候選':!available(candidates[0].IC)||!available(candidates[0]['機種'])?'來源未提供完整對應':'唯一匹配';
     return {'狀態':status,'候選':candidates,'查找條件':resolved,'查找依據':[...evidence.values()]};
+  }
+  resolveDetailOrder(part,order,result){
+    const orders=orderNumbers(order);
+    const orderIds=new Set(orders.flatMap(value=>[...(this.orderKeys.get(norm(value))||[])]));
+    const partIds=this.ids(firstText(part));
+    // An indexed part can only be disambiguated by records containing both identifiers.
+    const ids=partIds.size?[...orderIds].filter(id=>partIds.has(id)):[...orderIds];
+    const records=ids.sort((a,b)=>a-b).map(id=>this.records.get(id));
+    if(!records.length)return result;
+    const first=records[0];
+    if(records.some(record=>!available(record.ic)||!available(record.model)
+      ||norm(record.ic)!==norm(first.ic)||norm(record.model)!==norm(first.model)))return result;
+    const candidate={'機種':first.model,IC:first.ic,
+      '產品系列':[...new Set(records.map(record=>record.family).filter(Boolean))].sort(),
+      '來源':records.map(record=>this.source(record))};
+    const orderCondition={'欄位類別':'order','查找值':orders.join('\n'),'找到候選組數':1};
+    return {'狀態':'唯一匹配','候選':[candidate],
+      '查找條件':[...result['查找條件'],orderCondition],
+      '查找依據':records.map(record=>({'檔案':record.source_file,'分頁':record.sheet,'列號':record.row_number}))};
   }
 }
 export function matchTables(matcher,tables,filename){

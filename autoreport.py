@@ -425,6 +425,11 @@ def part_ids(db, value):
                                      (norm(value),))}
 
 
+def lookup_source(record):
+    return {'檔案': record['source_file'], '分頁': record['sheet'], '列號': record['row_number'],
+            '原始IC／機型': record['raw_ic'], '整理依據': json.loads(record['resolution_json'])}
+
+
 def lookup(db, criteria):
     """Resolve exact part numbers, intersecting separate part columns."""
     terms = [(kind, first_text(value)) for kind, value in criteria if kind in ('part', 'any')]
@@ -470,10 +475,7 @@ def lookup(db, criteria):
         pairs = set()
         for record_id in sorted(linked):
             rec = db.execute(RECORD_SQL + ' WHERE r.id=?', (record_id,)).fetchone()
-            source = {
-                '檔案': rec['source_file'], '分頁': rec['sheet'], '列號': rec['row_number'],
-                '原始IC／機型': rec['raw_ic'], '整理依據': json.loads(rec['resolution_json'])}
-            pairs.add(add_candidate(record_id, rec['model'], rec['ic'], rec['family'], source))
+            pairs.add(add_candidate(record_id, rec['model'], rec['ic'], rec['family'], lookup_source(rec)))
         # Records with IC should supersede incomplete mappings for the same identifier.
         if any(ic for _, ic in pairs):
             pairs = {p for p in pairs if p[1]}
@@ -500,6 +502,36 @@ def lookup(db, criteria):
         status = '唯一匹配'
     return {'狀態': status, '候選': candidates, '查找條件': resolved_criteria,
             '查找依據': list(evidence.values())}
+
+
+def lookup_detail(db, part, order):
+    """Use exact source rows as secondary evidence for Detail B/C inputs."""
+    baseline = lookup(db, [('part', part)])
+    if baseline['狀態'] == '唯一匹配':
+        return baseline
+    orders = order_numbers(order)
+    order_ids = {
+        record_id
+        for value in orders
+        for (record_id,) in db.execute('SELECT record_id FROM work_orders WHERE normalized_order=?', (norm(value),))
+    }
+    if not order_ids:
+        return baseline
+    exact_parts = part_ids(db, first_text(part))
+    selected_ids = order_ids & exact_parts if exact_parts else order_ids
+    records = [db.execute(RECORD_SQL + ' WHERE r.id=?', (record_id,)).fetchone()
+               for record_id in sorted(selected_ids)]
+    if not records or any(not available(row['model']) or not available(row['ic']) for row in records):
+        return baseline
+    if len({(norm(row['model']), norm(row['ic'])) for row in records}) != 1:
+        return baseline
+
+    sources = [lookup_source(record) for record in records]
+    candidate = {'機種': records[0]['model'], 'IC': records[0]['ic'],
+                 '產品系列': sorted({row['family'] for row in records if row['family']}), '來源': sources}
+    condition = {'欄位類別': 'order', '查找值': '\n'.join(orders), '找到候選組數': 1}
+    return {'狀態': '唯一匹配', '候選': [candidate], '查找條件': baseline['查找條件'] + [condition],
+            '查找依據': [{key: source[key] for key in ('檔案', '分頁', '列號')} for source in sources]}
 
 
 def search(db, query, limit=100):
@@ -542,18 +574,26 @@ def input_tables(payload, filename):
 
 
 def match_upload(db, payload, filename):
-    results, notices = [], []
+    results, notices, detail_lookups = [], [], {}
     for name, raw, expanded in input_tables(payload, filename):
         header = find_header(raw, allowed_roles={'part', 'any'})
         if not header:
             notices.append(f'「{name}」沒有可辨識的查找欄位；請使用料號或查詢值。')
             continue
         _, offset, headers, roles = header
+        detail = (filename.lower().endswith('.xlsx') and name == 'Detail'
+                  and role(cell_at(headers, 1)) == 'order' and cell_at(roles, 2) == 'part')
         for i in range(offset + 1, len(raw)):
             if not any(raw[i]):
                 continue
-            criteria = [(r, cell_at(expanded[i], c)) for c, r in enumerate(roles) if r and cell_at(expanded[i], c)]
-            result = lookup(db, criteria)
+            if detail:
+                key = (cell_at(expanded[i], 2), cell_at(expanded[i], 1))
+                if key not in detail_lookups:
+                    detail_lookups[key] = lookup_detail(db, *key)
+                result = detail_lookups[key]
+            else:
+                criteria = [(r, cell_at(expanded[i], c)) for c, r in enumerate(roles) if r and cell_at(expanded[i], c)]
+                result = lookup(db, criteria)
             unique = result['候選'][0] if result['狀態'] == '唯一匹配' else {}
             results.append({'分頁': name, '列號': i + 1,
                             '原始資料': [{'欄位': h, '值': cell_at(raw[i], c)} for c, h in enumerate(headers)],

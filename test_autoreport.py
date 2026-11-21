@@ -155,6 +155,44 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(result['結果'], [])
         self.assertEqual(result['提示'], ['「query」沒有可辨識的查找欄位；請使用料號或查詢值。'])
 
+    def test_detail_uses_exact_order_evidence_only_when_part_is_unresolved(self):
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = 'Detail'
+        sheet.append(['製程', '工單', '料號'])
+        for order, part in [
+            ('ORDER002', '98000001-107'),
+            ('~~ORDER003~~<br>SAP:WO999', 'SHARED'),
+            ('ORDER003\nORDER004', 'SHARED'),
+            ('ORDER001', 'SHARED'),
+            ('ORDER001', '93000001-107'),
+            ('ORDER001', ''),
+            ('ORDER006', '93000001-107'),
+        ]:
+            sheet.append(['DAF外觀', order, part])
+        generic = workbook.create_sheet('查詢')
+        generic.append(['製程', '工單', '料號'])
+        generic.append(['DAF外觀', 'ORDER003', 'SHARED'])
+        payload = io.BytesIO()
+        workbook.save(payload)
+
+        rows = a.match_upload(self.db, payload.getvalue(), 'upload.xlsx')['結果']
+        self.assertEqual([row['IC'] for row in rows], ['Goodix', 'Synaptics', '', '', 'Goodix', 'Goodix', '', ''])
+        self.assertEqual([row['狀態'] for row in rows],
+                         ['唯一匹配', '唯一匹配', '多組候選', '多組候選', '唯一匹配', '唯一匹配', '查無資料', '多組候選'])
+        self.assertEqual([criterion['欄位類別'] for criterion in rows[0]['查找條件']], ['part'])
+        self.assertEqual(rows[1]['查找條件'], [
+            {'欄位類別': 'part', '查找值': 'SHARED', '找到候選組數': 2},
+            {'欄位類別': 'order', '查找值': 'ORDER003\nWO999', '找到候選組數': 1},
+        ])
+        self.assertEqual(rows[1]['查找依據'][0]['列號'], 4)
+        self.assertEqual(rows[1]['原始資料'][1]['值'], '~~ORDER003~~<br>SAP:WO999')
+        self.assertEqual(rows[4]['原始資料'][2]['值'], '93000001-107')
+        self.assertEqual(rows[5]['原始資料'][2]['值'], '')
+        self.assertEqual(a.lookup(self.db, [('order', 'ORDER001')])['狀態'], '缺少查找欄位')
+        csv = '製程,工單,料號\nDAF外觀,ORDER003,SHARED\n'.encode()
+        self.assertEqual(a.match_upload(self.db, csv, 'Detail.csv')['結果'][0]['狀態'], '多組候選')
+
     def test_excel_formula_injection_exported_as_text(self):
         result = a.match_upload(self.db, '查询值\n=HYPERLINK("evil")\n'.encode(), 'formula.csv')
         book = load_workbook(io.BytesIO(a.export_matches(result)), data_only=False)
