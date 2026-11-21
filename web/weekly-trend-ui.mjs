@@ -14,8 +14,13 @@ const DAY=86400000;
 let results=[],sourceFiles=[],selection=new Set(),available=[],trend,controller,mode='week',productDetail;
 const hidden=new Set();
 let orderDetail, orderSkipInvalidRows;
-const unitLabel=()=>mode==='day'?'日':'週';
-const periodLabel=()=>mode==='day'?'當日':'本週';
+const trendScales={
+ day:{unit:'日',period:'當日',title:'日推移',statusSheet:'各日狀態',column:'日期',file:'每日不良率推移'},
+ week:{unit:'週',period:'本週',title:'跨週推移',statusSheet:'各週狀態',column:'週別',file:'跨週不良率推移'},
+ month:{unit:'月',period:'當月',title:'月推移',statusSheet:'各月狀態',column:'月份',file:'每月不良率推移'}
+};
+const unitLabel=()=>trendScales[mode].unit;
+const periodLabel=()=>trendScales[mode].period;
 const productPicker = createTrendPicker($('weeklyTrendProduct'), '產品', changeTrendScope);
 const processPicker = createTrendPicker($('weeklyTrendProcess'), '製程', changeTrendScope);
 function changeTrendScope() {
@@ -29,15 +34,15 @@ function buildJobs(range,sources,unit){
   if(!jobs.has(bucket.key)){
    const start=bucket.start_date<range.start_date?range.start_date:bucket.start_date;
    const end=bucket.end_date>range.end_date?range.end_date:bucket.end_date;
-   const label=unit==='day'?bucket.key:bucket.key.replace('_w','-W').replace(/_$/,'');
+   const label=unit==='week'?bucket.key.replace('_w','-W').replace(/_$/,''):bucket.key;
    jobs.set(bucket.key,{period:{start_date:start,end_date:end},label,sources:[]});
   }
   return jobs.get(bucket.key);
  }
- if(unit==='week')for(let date=range.start_date;date<=range.end_date;){
-  const week=periods.periodFor(date,unit);
-  jobFor(week);
-  date=new Date(Date.parse(week.end_date+'T00:00:00Z')+DAY).toISOString().slice(0,10);
+ if(unit!=='day')for(let date=range.start_date;date<=range.end_date;){
+  const bucket=periods.periodFor(date,unit);
+  jobFor(bucket);
+  date=new Date(Date.parse(bucket.end_date+'T00:00:00Z')+DAY).toISOString().slice(0,10);
  }
  for(const {id,key,name,dayCounts} of sources){
   const counts=new Map();
@@ -68,8 +73,8 @@ export async function runWeeklyTrend(range,sources,files,{skipInvalidRows=false,
  orderDetail?.dispose();
  orderDetail = null;
  orderSkipInvalidRows = skipInvalidRows;
- mode=unit==='day'?'day':'week';
- const axis=unitLabel(),title=mode==='day'?'日推移':'跨週推移';
+ mode=Object.hasOwn(trendScales,unit)?unit:'week';
+ const {unit:axis,title}=trendScales[mode];
  controller=new AbortController();
  const {signal}=controller,progress=$('weeklyTrendStatus'),cancel=$('weeklyTrendCancel');
  cancel.hidden=false;cancel.disabled=false;
@@ -106,7 +111,7 @@ export async function runWeeklyTrend(range,sources,files,{skipInvalidRows=false,
  if(mode==='day')results=results.filter(period=>period.status!=='empty');
  if(!results.length){progress.textContent='所選期間沒有可顯示的日期。';return;}
  const counts=status=>results.filter(period=>period.status===status).length;
- progress.textContent=(signal.aborted?'已取消，保留已完成的摘要。':title+'已完成。')+' 有投入 '+counts('ready')+' '+axis+(mode==='week'?'，無投入 '+counts('empty')+' 週':'')+'，無法計算 '+counts('error')+' '+axis+'。'+(fromCache?' 已重用 '+fromCache+' '+axis+'摘要。':'')+(temporary?' '+temporary+' '+axis+'摘要暫存於本分頁。':'')+(results.some(period=>period.skipped)?' 有來源檔已略過錯誤列。':'');
+ progress.textContent=(signal.aborted?'已取消，保留已完成的摘要。':title+'已完成。')+' 有投入 '+counts('ready')+' '+axis+(mode!=='day'?'，無投入 '+counts('empty')+' '+axis:'')+'，無法計算 '+counts('error')+' '+axis+'。'+(fromCache?' 已重用 '+fromCache+' '+axis+'摘要。':'')+(temporary?' '+temporary+' '+axis+'摘要暫存於本分頁。':'')+(results.some(period=>period.skipped)?' 有來源檔已略過錯誤列。':'');
  showResult(range,preserveFilters);
 }
 
@@ -128,16 +133,16 @@ function showResult(range,preserveFilters){
   for(const [process] of week.summary?.processes||[])processes.add(process);
  }
  warnings.parentElement.hidden=!warnings.children.length;
- const daily=mode==='day',axis=unitLabel();
+ const daily=mode==='day',{unit:axis,title,column}=trendScales[mode];
  $('weeklyTrendTitle').textContent='不良率項目推移圖（'+axis+'）';
- $('weeklyTrendExport').textContent='下載'+(daily?'日推移':'跨週推移')+' Excel';
+ $('weeklyTrendExport').textContent='下載'+title+' Excel';
  $('weeklyTrendScope').textContent=range.start_date+' ～ '+range.end_date+' · 共 '+results.length+' '+axis;
- $('weeklyTrendDetailSummary').textContent=daily?'點位明細（日）':'點位明細（週）';
+ $('weeklyTrendDetailSummary').textContent='點位明細（'+axis+'）';
  $('weeklyTrendChart').setAttribute('aria-label','逐'+axis+'不良率折線圖');
- $('weeklyTrendWarningsTitle').textContent=daily?'查看無法計算的日期':'查看無法計算的週';
+ $('weeklyTrendWarningsTitle').textContent='查看無法計算的'+column;
  $('weeklyTrendHelp').textContent=daily
   ?'每天獨立去重。有投入但該項無不良時顯示 0%。沒有來源投入的日期略過，無法計算的日期留空。'
-  :'每個週點獨立去重。該製程有投入、該項無不良時顯示 0%；無投入或未完成的週留空。';
+  :'每個'+axis+'點獨立去重。該製程有投入、該項無不良時顯示 0%；無投入或未完成的'+axis+'留空。';
  $('weeklyTrendHelp').textContent+=' 點圖例或圓點可查看機種／IC，展開點位明細可查看料號。';
  $('weeklyTrendExportError').hidden=true;
  if (!preserveFilters) hidden.clear();
@@ -248,7 +253,7 @@ function drawChart(chosen){
  const step=Math.max(1,Math.ceil((mode==='day'?78:62)/slot));
  for(let i=0;i<dates.length;i+=step){
   ctx.fillStyle=dates[i].hasInput?'#17324a':'#64778a';
-  ctx.fillText(dates[i].label,x(i),height-(mode==='day'?20:29));
+  ctx.fillText(dates[i].label,x(i),height-(mode==='week'?29:20));
   if(mode==='week'&&slot>=76)ctx.fillText(dates[i].start.slice(5)+'～'+dates[i].end.slice(5),x(i),height-12);
  }
  for(const line of series){
@@ -417,16 +422,16 @@ $('weeklyTrendExport').onclick=async()=>{
  const button=$('weeklyTrendExport'),error=$('weeklyTrendExportError'),canvas=$('weeklyTrendChart');
  if(!trend?.series.length)return;
  error.hidden=true;button.disabled=true;
- const snapshot=canvas.toDataURL('image/png'),daily=mode==='day',axis=unitLabel();
+ const snapshot=canvas.toDataURL('image/png'),{unit:axis,statusSheet,column,file}=trendScales[mode];
  try{
   const bytes=await createDefectTrendWorkbook(trend,{
    keepEmptyPeriods:true,sources:sourceFiles,snapshot,imageWidth:parseFloat(canvas.style.width),imageHeight:260,
    scope:[$('weeklyTrendScope').textContent,productPicker.label,processPicker.label].filter(Boolean).join(' · '),
    notes:[['橫軸日期單位',axis],['製程複選','選取部分且多個製程時，請查看推移明細中的各製程投入。日期投入頁的範圍唯一投入與不良欄位留空。'],['去重口徑','每個'+axis+'點獨立計算，同一 PPID 跨'+axis+'可在各'+axis+'計入一次。']],
-   sheets:[{name:daily?'各日狀態':'各週狀態',rows:[[daily?'日期':'週別','納入起日','納入迄日','狀態'],...results.map(week=>[week.label,week.start_date,week.end_date,week.error||{ready:'已計算',empty:'無投入',pending:'尚未計算'}[week.status]])]}]
+   sheets:[{name:statusSheet,rows:[[column,'納入起日','納入迄日','狀態'],...results.map(week=>[week.label,week.start_date,week.end_date,week.error||{ready:'已計算',empty:'無投入',pending:'尚未計算'}[week.status]])]}]
   });
   const url=URL.createObjectURL(new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
-  const link=document.createElement('a');link.href=url;link.download=daily?'AutoReport_每日不良率推移.xlsx':'AutoReport_跨週不良率推移.xlsx';link.click();setTimeout(()=>URL.revokeObjectURL(url),1500);
+  const link=document.createElement('a');link.href=url;link.download='AutoReport_'+file+'.xlsx';link.click();setTimeout(()=>URL.revokeObjectURL(url),1500);
  }catch(e){error.textContent=e.message;error.hidden=false;}
  finally{button.disabled=!trend?.series.length;}
 };

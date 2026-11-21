@@ -42,17 +42,19 @@ function summarize(analysis){
 }
 
 self.onmessage=async({data:{period,sources,skipInvalidRows,mode,stageContext,orderScope}})=>{
- const label=mode==='day'?'當日':'本週';
+ const label=mode==='month'?'當月':mode==='day'?'當日':'本週';
+ const maxRows=mode==='month'?1200000:MAX_ROWS;
+ const limitLabel=mode==='month'?'120 萬':'30 萬';
  try{
   const merger=new globalThis.DetailMerger(null,{skipInvalidRows});
   for(const source of sources){
-   if(source.rows>MAX_ROWS)throw Error(source.name+' 在'+label+'超過 30 萬筆索引紀錄。');
+   if(source.rows>maxRows)throw Error(source.name+' 在'+label+'超過 '+limitLabel+'筆索引紀錄。');
    const meta=await index.meta(source.key);
    if(!meta?.complete)throw Error(source.name+' 的日期索引尚未完成。');
    merger.prepareIndexed(meta,period);
    await index.scan(source.key,period,value=>{
     merger.addIndexed(value);
-    if(merger.rows.size>MAX_ROWS)throw Error(label+'去重後仍超過 30 萬筆過站紀錄。');
+    if(merger.rows.size>maxRows)throw Error(label+'去重後仍超過 '+limitLabel+'筆過站紀錄。');
    });
    merger.completeIndexed();
   }
