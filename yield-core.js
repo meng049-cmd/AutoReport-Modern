@@ -3,7 +3,7 @@
 const preferred=['DAF外觀','DAF熱壓投入','功能一測試','功能二測試','外觀檢查點亮測試','輝度機測試'];
 function canonical(value){
  const name=String(value).trim().replace(/\s+/g,'');
- const aliases={'DAF外觀檢查':'DAF外觀','DAF熱壓入':'DAF熱壓投入','功能一測試':'功能一測試','功能一測':'功能一測試','功能一測試站':'功能一測試','功能二測':'功能二測試','功能二測試站':'功能二測試','外觀檢查點亮測試':'外觀檢查點亮測試','外觀檢查點亮':'外觀檢查點亮測試','輝度機測試':'輝度機測試','輝度機測':'輝度機測試'};
+ const aliases={'DAF外觀檢查':'DAF外觀','DAF熱壓入':'DAF熱壓投入','DAF投入':'DAF熱壓投入','功能一測試':'功能一測試','功能一測':'功能一測試','功能一測試站':'功能一測試','功能二測':'功能二測試','功能二測試站':'功能二測試','外觀檢查點亮測試':'外觀檢查點亮測試','外觀檢查點亮':'外觀檢查點亮測試','輝度機測試':'輝度機測試','輝度機測':'輝度機測試'};
  return aliases[name]||name;
 }
 function buildYieldReport(merger,identities,{includeDetail=true,period=null}={}){

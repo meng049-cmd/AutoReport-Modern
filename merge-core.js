@@ -9,7 +9,7 @@
     if(status!=='FAIL'&&!defect)return null;
     return {order:String(row[1]??'').trim(),part:String(row[2]??'').trim(),serial:String(row[4]).trim(),process:String(row[0]).trim(),date:value.day,timestamp:value.timestamp,status,defect:defect||'【未填不良項目】'};
   }
-  function canonicalAnalysisProcess(value){const name=String(value??'').normalize('NFKC').trim().replace(/\s+/g,'');return ({'DAF外觀檢查':'DAF外觀','DAF熱壓入':'DAF熱壓投入','功能一測':'功能一測試','功能一測試站':'功能一測試','功能二測':'功能二測試','功能二測試站':'功能二測試','外觀檢查點亮':'外觀檢查點亮測試','輝度機測':'輝度機測試'})[name]||name;}
+  function canonicalAnalysisProcess(value){const name=String(value??'').normalize('NFKC').trim().replace(/\s+/g,'');return ({'DAF外觀檢查':'DAF外觀','DAF熱壓入':'DAF熱壓投入','DAF投入':'DAF熱壓投入','功能一測':'功能一測試','功能一測試站':'功能一測試','功能二測':'功能二測試','功能二測試站':'功能二測試','外觀檢查點亮':'外觀檢查點亮測試','輝度機測':'輝度機測試'})[name]||name;}
   const isAnalysisProcess=value=>['DAF外觀','DAF熱壓投入','功能一測試','功能二測試','外觀檢查點亮測試','輝度機測試'].includes(canonicalAnalysisProcess(value));
   const preferNG=(next,previous)=>!previous||(next.status==='FAIL'&&previous.status!=='FAIL');
   class DetailMerger {

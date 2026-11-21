@@ -16,7 +16,7 @@ export function canonicalCorrectionName(value,options=[]){
 
 const stageProcesses=new Set(['DAF外觀','DAF熱壓投入','功能一測試','功能二測試','外觀檢查點亮測試','輝度機測試'].map(norm));
 const stageProcessAliases=new Map([
- ['DAF外觀檢查','DAF外觀'],['DAF熱壓入','DAF熱壓投入'],['功能一測','功能一測試'],['功能一測試站','功能一測試'],
+ ['DAF外觀檢查','DAF外觀'],['DAF熱壓入','DAF熱壓投入'],['DAF投入','DAF熱壓投入'],['功能一測','功能一測試'],['功能一測試站','功能一測試'],
  ['功能二測','功能二測試'],['功能二測試站','功能二測試'],['外觀檢查點亮','外觀檢查點亮測試'],['輝度機測','輝度機測試']
 ].map(([alias,canonical])=>[norm(alias),norm(canonical)]));
 
