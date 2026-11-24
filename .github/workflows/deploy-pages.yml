@@ -46,7 +46,7 @@ jobs:
       - name: Check out the part-number edition
         uses: actions/checkout@v6
         with:
-          ref: 74a366e27bcebd40b0ce6bac7d1b879049df0b3b # modern-part-number
+          ref: efd3f9bf4be887c8b7527df9892f7011a88c25a5 # modern-part-number
           path: part-edition
           persist-credentials: false
 
