@@ -5,7 +5,7 @@ import {createTrendPicker} from './trend-picker.mjs';
 import {mountTrendOrderDetail} from './trend-order-detail.mjs';
 import {renderTrendPointTable} from './trend-point-details.mjs';
 const $=id=>document.getElementById(id),pct=value=>Number.isFinite(value)?(value*100).toFixed(2)+'%':'—';
-let analysis,filters={},onOrder=()=>{},orderRows=[],orderPage=0,trend,trendSource,globalProduct='',hidden=new Set(),colors=new Map(),selectedItems=null,availableItems=[];
+let analysis,filters={},onOrder=()=>{},onOrderPPIDs=()=>{},orderRows=[],orderPage=0,trend,trendSource,globalProduct='',hidden=new Set(),colors=new Map(),selectedItems=null,availableItems=[];
 let trendDetailsTrigger=null, orderDetail;
 const dateUnitLabels={day:'日',week:'週',month:'月'};
 export const chartDateUnitLabel=unit=>dateUnitLabels[unit]||dateUnitLabels.day;
@@ -48,7 +48,48 @@ function sourceOptions(forOrder=false) {
  };
 }
 function searchedOrders(){const query=$('orderYieldSearch').value.trim().toLowerCase();return orderRows.filter(row=>[row.order,row.ic,row.model].some(value=>String(value).toLowerCase().includes(query)));}
-function renderOrders(){const rows=searchedOrders(),pages=Math.max(1,Math.ceil(rows.length/30));orderPage=Math.min(orderPage,pages-1);const table=document.createElement('table'),header=table.createTHead().insertRow();for(const label of ['料號','IC／機種','投入 PPID','良品 PPID','不良 PPID','料號良率','不良率','日期']){const th=document.createElement('th');th.textContent=label;header.append(th);}const body=table.createTBody();for(const row of rows.slice(orderPage*30,orderPage*30+30)){const tr=body.insertRow(),button=document.createElement('button');button.type='button';button.className='secondary';button.style.padding='4px 7px';button.textContent=row.order;button.onclick=()=>onOrder(row.order);tr.insertCell().append(button);for(const value of [row.ic+'／'+row.model,row.total,row.good,row.fail,pct(row.yield),pct(row.badRate),row.start+' — '+row.end])tr.insertCell().textContent=value;}$('orderYieldTable').replaceChildren(table);$('orderYieldPage').textContent=(orderPage+1)+' / '+pages+' · '+rows.length+' 筆';$('orderYieldPrev').disabled=orderPage===0;$('orderYieldNext').disabled=orderPage===pages-1;$('orderYieldDownload').disabled=!rows.length;}
+function renderOrders(){
+ const rows=searchedOrders(),pages=Math.max(1,Math.ceil(rows.length/30));
+ orderPage=Math.min(orderPage,pages-1);
+ const table=document.createElement('table'),header=table.createTHead().insertRow();
+ for(const label of ['料號','IC／機種','投入 PPID','良品 PPID','不良 PPID','料號良率','不良率','日期']){
+  const th=document.createElement('th');
+  th.scope='col';
+  th.textContent=label;
+  header.append(th);
+ }
+ const body=table.createTBody();
+ for(const row of rows.slice(orderPage*30,orderPage*30+30)){
+  const tr=body.insertRow();
+  const button=document.createElement('button');
+  button.type='button';
+  button.className='secondary';
+  button.style.padding='4px 7px';
+  button.textContent=row.order;
+  button.onclick=()=>onOrder(row.order);
+  tr.insertCell().append(button);
+  for(const value of [row.ic+'／'+row.model,row.total,row.good])tr.insertCell().textContent=value;
+  const badCell=tr.insertCell();
+  if(row.fail){
+   const detail=document.createElement('button');
+   detail.type='button';
+   detail.className='secondary';
+   detail.style.padding='4px 7px';
+   detail.textContent=row.fail.toLocaleString();
+   detail.setAttribute('aria-label',`查看料號 ${row.order} ${row.ic}／${row.model} 的 ${row.fail} 個不良 PPID`);
+   detail.onclick=()=>onOrderPPIDs(row);
+   badCell.append(detail);
+  }else{
+   badCell.textContent='0';
+  }
+  for(const value of [pct(row.yield),pct(row.badRate),row.start+' — '+row.end])tr.insertCell().textContent=value;
+ }
+ $('orderYieldTable').replaceChildren(table);
+ $('orderYieldPage').textContent=(orderPage+1)+' / '+pages+' · '+rows.length+' 筆';
+ $('orderYieldPrev').disabled=orderPage===0;
+ $('orderYieldNext').disabled=orderPage>=pages-1;
+ $('orderYieldDownload').disabled=!rows.length;
+}
 function updateTrendSummary(){const count=availableItems.filter(name=>selectedItems==null||selectedItems.has(name)).length;$('trendItemsSummary').textContent=count===availableItems.length?'全部不良項目（'+count+'）':'已選 '+count+'／'+availableItems.length+' 項';}
 function renderTrendChoices(){
  const query=$('trendItemSearch').value.trim().normalize('NFKC').toLowerCase(),host=$('trendDefectChoices');host.replaceChildren();
@@ -273,7 +314,7 @@ function renderTrend(){
  };
  canvas.dataset.points=trend.dates.length;canvas.dataset.series=trend.series.length;canvas.dataset.visibleSeries=visible.length;$('trendDownload').disabled=!visible.length;canvas.setAttribute('aria-label','不良項目推移圖；各製程依該製程唯一投入PPID計算，單一不良項目會標示點位不良率；只顯示有投入PPID的日期或區間');$('trendSummary').textContent=trend.dates.length+' 個有投入的日期區間 · 製程：'+processPicker.label+' · 顯示 '+visible.length+'／'+trend.series.length+' 條線';
 }
-export function renderQualityExtras(data,scope,selectOrder) {
+export function renderQualityExtras(data,scope,selectOrder,openOrderPPIDs) {
  const changed = analysis !== data;
  const productChanged = globalProduct !== scope.product;
  const processChanged = filters.process !== scope.process || filters.stage !== scope.stage;
@@ -282,6 +323,7 @@ export function renderQualityExtras(data,scope,selectOrder) {
  filters = {...scope};
  syncChartDateUnits($('trendChartDateUnit'), scope.granularity, changed||unitChanged ? scope.granularity : undefined);
  onOrder = selectOrder;
+ onOrderPPIDs = openOrderPPIDs;
  if (changed || productChanged) {
   selectedItems = null;
   hidden.clear();

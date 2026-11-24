@@ -295,11 +295,31 @@ function render(){
  const conflicts=analysis.identityConflicts||[],notice=$('qualityProductConflictWarning');notice.hidden=!conflicts.length;notice.replaceChildren();
  if(conflicts.length){const message=document.createElement('span'),button=document.createElement('button');message.textContent=`發現 ${conflicts.length} 個 PPID 有不同的 IC／機種對照，已暫列待補產品，不會猜測機種。請查閱完整分析報表「PPID對照衝突」工作表，到 Raw Data 原始檔案庫一次選取相關原始檔進行比對，系統會將衝突列轉入手動補填。`;button.type='button';button.className='secondary';button.textContent='前往 Raw Data 原始檔案庫';button.onclick=()=>navigate('raw');notice.append(message,button);}
  renderYieldOverview();
- $('qualityPeriod').textContent=filters.days?.length?'複選日期：'+filters.days.join('、'):filters.startDate+' — '+filters.endDate;renderDateTable();renderDefects();renderQualityExtras(analysis,filters,order=>setFilter('order',order));for(const stage of stages){drawStageChart(stage);$('summary-'+stage.key).textContent='期間製程平均 '+pct(stageModel(stage.key).period.value)+' · 唯一PPID '+pct(stageModel(stage.key).period.uniqueYield)+' · 目標 '+pct(stage.target)+' · 期間唯一投入 '+stageModel(stage.key).period.input+(stageModel(stage.key).comparisonNote?' · '+stageModel(stage.key).comparisonNote:'');renderStageDrill(stage);}
+ $('qualityPeriod').textContent=filters.days?.length?'複選日期：'+filters.days.join('、'):filters.startDate+' — '+filters.endDate;renderDateTable();renderDefects();renderQualityExtras(analysis,filters,order=>setFilter('order',order),row=>openDetails('ppid',row));for(const stage of stages){drawStageChart(stage);$('summary-'+stage.key).textContent='期間製程平均 '+pct(stageModel(stage.key).period.value)+' · 唯一PPID '+pct(stageModel(stage.key).period.uniqueYield)+' · 目標 '+pct(stage.target)+' · 期間唯一投入 '+stageModel(stage.key).period.input+(stageModel(stage.key).comparisonNote?' · '+stageModel(stage.key).comparisonNote:'');renderStageDrill(stage);}
  renderedWidth=$('qualityDashboard').clientWidth;
 }
 function scheduleLayoutRender(){cancelAnimationFrame(layoutFrame);layoutFrame=requestAnimationFrame(()=>{layoutFrame=0;if(analysis&&!$('qualityView').hidden&&$('qualityDashboard').clientWidth!==renderedWidth)render();});}
-function openDetails(mode='ppid'){detailMode=mode;detailRows=mode==='order'?workOrderRows(analysis,filters):attributedRows(analysis,filters);detailPage=0;$('defectDetailTitle').textContent=mode==='order'?'不良料號明細':'不良 PPID 明細';$('defectSearch').value='';$('defectSearch').placeholder=mode==='order'?'搜尋料號、產品、不良項目':'搜尋 PPID、料號、不良項目';renderDetails();$('defectDetails').showModal();}
+function openDetails(mode='ppid',partRow){
+ detailMode=mode;
+ if(partRow){
+  // Use the same scope and unique attributed PPIDs as the clicked yield row.
+  const scope={...filters,order:partRow.order,product:partRow.product,defect:''};
+  const unique=new Map();
+  for(const row of attributedRows(analysis,scope))if(!unique.has(row.serial))unique.set(row.serial,row);
+  detailRows=[...unique.values()];
+ }else{
+  detailRows=mode==='order'?workOrderRows(analysis,filters):attributedRows(analysis,filters);
+ }
+ detailPage=0;
+ const title=mode==='order'?'不良料號明細':'不良 PPID 明細';
+ $('defectDetailTitle').textContent=partRow
+  ?[title,partRow.order,partRow.ic+'／'+partRow.model,filters.process].filter(Boolean).join(' · ')
+  :title;
+ $('defectSearch').value='';
+ $('defectSearch').placeholder=mode==='order'?'搜尋料號、產品、不良項目':'搜尋 PPID、料號、不良項目';
+ renderDetails();
+ $('defectDetails').showModal();
+}
 function renderDetails(){
  const query=$('defectSearch').value.trim().toLowerCase(),rows=detailRows.filter(row=>Object.values(row).some(value=>String(value??'').toLowerCase().includes(query))),pages=Math.max(1,Math.ceil(rows.length/50));detailPage=Math.min(detailPage,pages-1);const table=document.createElement('table'),head=document.createElement('thead'),header=document.createElement('tr'),body=document.createElement('tbody'),headers=detailMode==='order'?['料號','IC','機種','投入 PPID','不良 PPID','歸屬日期','不良項目']:['日期','製程','IC','機種','PPID','不良項目','狀態','料號'];
  for(const value of headers){const th=document.createElement('th');th.textContent=value;header.append(th);}head.append(header);for(const row of rows.slice(detailPage*50,detailPage*50+50)){const tr=document.createElement('tr'),values=detailMode==='order'?[row.order,row.ic,row.model,row.input,row.count,row.dates,row.defects]:[row.date,row.process,row.ic,row.model,row.serial,row.defect,row.status,row.order];for(const value of values){const td=document.createElement('td');td.textContent=value??'';tr.append(td);}body.append(tr);}table.append(head,body);$('defectDetailTable').replaceChildren(table);$('defectPage').textContent=`${detailPage+1} / ${pages} · ${rows.length.toLocaleString()} 筆`;$('defectPrev').disabled=detailPage===0;$('defectNext').disabled=detailPage>=pages-1;
