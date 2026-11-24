@@ -1,4 +1,5 @@
 import config from './cloud-config.js';
+import {createPartBackupClient,generateRecoveryCode} from './part-backup.mjs';
 
 const MAX_BYTES = 50 * 1024 * 1024;
 const APPS = {
@@ -171,6 +172,126 @@ function needsLoginForAnalysis(settings, pageLocation = globalThis.location) {
   if (!pageLocation) return true;
   return pageLocation.protocol !== 'file:' && !['localhost', '127.0.0.1', '[::1]'].includes(pageLocation.hostname);
 }
+function mountPartBackup(panel) {
+  const cloudControls = config.partBackup ? `
+    <p>免帳號。使用同一把復原金鑰在不同電腦上傳與取回備份。請妥善保管金鑰。每份備份上限 50 MB。</p>
+    <label>復原金鑰 <input id="partBackupCode" type="password" autocomplete="off" spellcheck="false"></label>
+    <button type="button" data-backup-action="generate">建立復原金鑰</button>
+    <button type="button" data-backup-action="toggle" aria-controls="partBackupCode">顯示金鑰</button>
+    <button type="button" data-backup-action="copy">複製金鑰</button>
+    <div class="cloud-backup-actions">
+      <button type="button" data-backup-action="upload">上傳本機資料</button>
+      <button type="button" data-backup-action="download">下載雲端備份</button>
+      <button type="button" data-backup-action="restore">還原雲端備份至本機</button>
+    </div>` : '';
+  panel.innerHTML = `<summary>${config.partBackup?'雲端與本機備份':'本機備份'}</summary>${cloudControls}
+    <div class="cloud-backup-actions">
+      <button type="button" data-backup-action="local">下載料號版本機備份</button>
+      <label>還原料號版備份 <input type="file" accept="application/json,.json"></label>
+    </div>
+    <p class="cloud-status" role="status" aria-live="polite"></p>`;
+  const status=panel.querySelector('[role=status]'), code=panel.querySelector('#partBackupCode');
+  const fileInput=panel.querySelector('input[type=file]');
+  const controls=Array.from(panel.querySelectorAll('button,input'));
+  let anonymous, serviceReady=false;
+  async function rpc(name,body){
+    anonymous ||= new CloudClient(config);
+    try{
+      if(!serviceReady){
+        const ready=await anonymous.request('/rest/v1/rpc/autoreport_part_backup_ready',{method:'POST',body:{}});
+        if(ready!==true)throw Error('無法確認雲端備份服務已啟用。');
+        serviceReady=true;
+      }
+      if(!anonymous.session){
+        let resumed=false;
+        try{resumed=await anonymous.resume();}
+        catch(error){
+          if(!/refresh.token|登入已失效/i.test(error.message))throw error;
+        }
+        if(!resumed)await anonymous.signInAnonymously();
+      }
+      return await anonymous.request('/rest/v1/rpc/'+name,{method:'POST',body,token:await anonymous.access()});
+    }catch(error){
+      if(/Could not find the function|PGRST202/i.test(error.message))throw Error('雲端備份服務尚未啟用。目前可繼續使用本機備份。');
+      throw error;
+    }
+  }
+  async function run(action){
+    controls.forEach(control=>control.disabled=true);
+    try{await action();}
+    catch(error){status.textContent=error.message;}
+    finally{controls.forEach(control=>control.disabled=false);}
+  }
+  async function readBackup(file){
+    if(file.size>MAX_BYTES)throw Error('備份檔超過 50 MB。');
+    return validateSnapshot(decode(JSON.parse(await file.text())),config.app);
+  }
+  async function replace(snapshot){
+    await saveBackup(await capture(config.app),config.app);
+    if(!confirm('已開始下載目前資料的備份。確定要還原並取代此料號版的本機資料？'))return;
+    await restore(snapshot,config.app);
+    location.reload();
+  }
+  fileInput.onchange=()=>run(async()=>{
+    try{if(fileInput.files[0])await replace(await readBackup(fileInput.files[0]));}
+    finally{fileInput.value='';}
+  });
+  panel.onclick=event=>{
+    const action=event.target.dataset.backupAction;
+    if(!action)return;
+    if(action==='toggle'){
+      code.type=code.type==='password'?'text':'password';
+      event.target.textContent=code.type==='password'?'顯示金鑰':'隱藏金鑰';
+      return;
+    }
+    void run(async()=>{
+      if(action==='local'){
+        await saveBackup(await capture(config.app),config.app);
+        status.textContent='本機備份已下載。';
+        return;
+      }
+      if(action==='generate'){
+        if(code.value&&!confirm('要換成新金鑰嗎？取回先前的備份仍需要原金鑰。'))return;
+        code.value=generateRecoveryCode();
+        status.textContent='已建立復原金鑰。請複製並保存在安全的位置。';
+        return;
+      }
+      if(action==='copy'){
+        if(!code.value.trim())throw Error('請先建立或輸入復原金鑰。');
+        await navigator.clipboard.writeText(code.value.trim());
+        status.textContent='復原金鑰已複製。';
+        return;
+      }
+      const backup=await createPartBackupClient({code:code.value,request:rpc});
+      status.textContent='正在讀取雲端版本…';
+      const head=await backup.head();
+      if(action==='upload'){
+        if(!confirm(head.revision
+          ?`要上傳本機資料並取代雲端版本 ${head.revision} 嗎？`
+          :'要將本機對照資料庫和檔案庫加密後上傳嗎？')){
+          status.textContent='已取消上傳。';
+          return;
+        }
+        status.textContent='正在加密並上傳備份…';
+        const encoded=await encode(await capture(config.app));
+        const revision=await backup.upload(new Blob([JSON.stringify(encoded)]),head.revision);
+        status.textContent=`雲端備份已上傳 · 版本 ${revision}。請保留復原金鑰。`;
+      }else{
+        if(!head.revision)throw Error('這把復原金鑰尚無雲端備份。');
+        status.textContent='正在下載並解密備份…';
+        const snapshot=await readBackup(await backup.download(head.revision));
+        if(action==='restore'){
+          status.textContent='雲端備份已下載。';
+          await replace(snapshot);
+        }else{
+          await saveBackup(snapshot,config.app);
+          status.textContent=`已下載雲端備份 · 版本 ${head.revision}。`;
+        }
+      }
+    });
+  };
+}
+
 function mount() {
   if(document.querySelector('.cloud-sync'))return;
   const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = new URL('./cloud-sync.css', import.meta.url); document.head.append(css);
@@ -178,7 +299,7 @@ function mount() {
   panel.innerHTML = `<summary>帳號與雲端同步</summary><p>${config.anonymousAuth?'不需信箱登入。分析可直接使用；按下方按鈕後，才會在此瀏覽器建立匿名雲端身分。此身分無法跨裝置或清除瀏覽器資料後復原；勿在公用裝置使用。':'本機開發環境可免登入使用分析。外部網站需註冊並完成信箱驗證、登入後才能分析；登入帳號也用來區分各人的雲端備份。'}此處只同步 AutoReport 的對照庫與檔案庫，需手動操作，不會自動上傳。</p><p class="cloud-status" role="status" aria-live="polite"></p><button class="anonymous-start" type="button" data-action="start-anonymous" hidden>啟用匿名雲端備份</button><form class="cloud-login"><label>電子郵件 <input name="email" type="email" autocomplete="username" required></label><label>密碼 <input name="password" type="password" autocomplete="current-password" minlength="8" required></label><button type="submit">登入</button><button type="button" data-action="signup">註冊</button></form><div class="cloud-actions" hidden><button type="button" data-action="head">讀取雲端版本</button><button type="button" data-action="upload">上傳本機資料</button><button type="button" data-action="download">下載雲端備份</button><button type="button" data-action="local-backup">下載本機備份</button><button type="button" data-action="restore">還原雲端資料</button><button type="button" data-action="logout">登出</button></div><p>${config.anonymousAuth?'上傳資料會關聯到這個瀏覽器的匿名身分。遺失身分後無法找回雲端備份。':''}上傳會建立此身分的新雲端版本，取代它先前的目前版本；還原會取代本裝置的網站資料。每份備份上限 50 MB；分析快取不會同步。</p><label>從備份檔復原本機資料 <input class="cloud-import" type="file" accept="application/json,.json"></label>`;
   const app=document.getElementById('analysisApp'),gateRequired=!!app&&needsLoginForAnalysis(config);
   (app?document.body:(document.querySelector('main')||document.body)).prepend(panel);
-  if(gateRequired||config.anonymousAuth)panel.open=true;
+  if(gateRequired||config.anonymousAuth&&!config.partBackup)panel.open=true;
   const status = panel.querySelector('.cloud-status'), form = panel.querySelector('form'), actions = panel.querySelector('.cloud-actions'), anonymousStart=panel.querySelector('.anonymous-start');
   if(config.anonymousAuth)form.hidden=true;
   form.onsubmit = event => event.preventDefault();
@@ -186,29 +307,8 @@ function mount() {
   const ownerKey='autoreport-local-owner';
   function bootstrap(allowed){if(!app)return;document.body.classList.toggle('analysis-is-locked',!allowed);app.hidden=!allowed;app.inert=!allowed;if(allowed&&!appStarted){appStarted=true;const entry=document.getElementById('analysis-entry');if(entry){const script=document.createElement('script');script.type='module';script.src=JSON.parse(entry.textContent).src;document.body.append(script);}}}
   bootstrap(!gateRequired);
-  if(config.localOnly){
-    panel.innerHTML='<summary>本機備份</summary><button type="button">下載料號版本機備份</button> <label>還原料號版備份 <input type="file" accept="application/json,.json"></label><p role="status" aria-live="polite"></p>';
-    const status=panel.querySelector('[role=status]');
-    const download=panel.querySelector('button'), input=panel.querySelector('input');
-    async function localAction(action){
-      download.disabled=input.disabled=true;
-      try{await action();}catch(error){status.textContent=error.message;}
-      finally{download.disabled=input.disabled=false;input.value='';}
-    }
-    download.onclick=()=>localAction(async()=>{
-      await saveBackup(await capture(config.app),config.app);
-      status.textContent='本機備份已下載。';
-    });
-    input.onchange=()=>localAction(async()=>{
-      const file=input.files[0];
-      if(!file)return;
-      if(file.size>MAX_BYTES)throw Error('備份檔超過 50 MB。');
-      const snapshot=validateSnapshot(decode(JSON.parse(await file.text())),config.app);
-      await saveBackup(await capture(config.app),config.app);
-      if(!confirm('已下載目前資料的備份。確定要還原並取代此料號版的本機資料？'))return;
-      await restore(snapshot,config.app);
-      location.reload();
-    });
+  if(config.localOnly||config.partBackup){
+    mountPartBackup(panel);
     return;
   }
   const switchAccount=document.createElement('button');switchAccount.type='button';switchAccount.textContent='切換帳號並清除本機副本';switchAccount.hidden=true;panel.append(switchAccount);
