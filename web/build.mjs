@@ -9,8 +9,14 @@ const weeklyTrendVersion=createHash('sha256').update(calculationVersion);
 for(const file of ['web/weekly-trend-worker.mjs','web/defect-analysis.mjs','web/stage-metrics.mjs'])weeklyTrendVersion.update(await readFile(file));
 const weeklyVersion=weeklyTrendVersion.digest('hex').slice(0,16);
 const anonymousCloudMode=!cloudConfig.localOnly&&!cloudConfig.partBackup&&process.env.AUTOREPORT_ANONYMOUS_CLOUD==='1';
+const cloudImports={
+  'cloud-sync.mjs':['cloud-config.js','part-backup.mjs','part-report-data.mjs'],
+  'part-report-data.mjs':['part-backup.mjs','report-period.mjs','part-report-workbook.mjs']
+};
+const cloudAssets=[...new Set(['cloud-sync.css',...Object.keys(cloudImports),...Object.values(cloudImports).flat()])];
 const hash=createHash('sha256');
-for(const file of ['analysis-product-corrections.js','period-core.js','indexed-detail-store.js','detail-index-worker.js','detail-compaction-worker.js','node_modules/jszip/dist/jszip.min.js','web/detail-index.mjs','web/analysis-range-ui.mjs','web/weekly-trend-ui.mjs','web/weekly-trend-worker.mjs','report-sheets.js','web/stage-product-series.mjs','web/stage-week-context.mjs','web/stage-metrics.mjs','web/chart-formulas.mjs','web/stage-drill-ui.mjs','web/stage-analysis.mjs','web/analysis-cache.mjs','web/quality-extras.mjs','web/trend-picker.mjs','web/trend-order-detail.mjs','web/trend-point-details.mjs','web/navigation.mjs','web/ppid-lookup-ui.mjs','ppid-lookup-worker.js','vendor/package.json','vendor/xlsx.full.min.js','web/file-library.mjs','web/file-library-ui.mjs','web/detail-merge.mjs','web/limits.mjs','web/app.mjs','web/worker.mjs','web/files.mjs','web/matcher.mjs','web/match-corrections.mjs','web/merge-ui.mjs','merge-core.js','merge-worker.js','yield-core.js','yield-worker.js','quality-core.js','threshold-core.js','web/yield-ui.mjs','web/quality-ui.mjs','web/chart-export.mjs','web/defect-analysis.mjs','web/report-context.mjs','web/threshold-ui.mjs','web/index.html','web/build.mjs','browser-storage.js','browser-db-worker.js','autoreport.py','web/update_database.py','cloud/cloud-sync.mjs','cloud/part-backup.mjs','cloud/cloud-config.js','cloud/cloud-sync.css'])hash.update(await readFile(file));
+for(const file of ['analysis-product-corrections.js','period-core.js','indexed-detail-store.js','detail-index-worker.js','detail-compaction-worker.js','node_modules/jszip/dist/jszip.min.js','web/detail-index.mjs','web/analysis-range-ui.mjs','web/weekly-trend-ui.mjs','web/weekly-trend-worker.mjs','report-sheets.js','web/stage-product-series.mjs','web/stage-week-context.mjs','web/stage-metrics.mjs','web/chart-formulas.mjs','web/stage-drill-ui.mjs','web/stage-analysis.mjs','web/analysis-cache.mjs','web/quality-extras.mjs','web/trend-picker.mjs','web/trend-order-detail.mjs','web/trend-point-details.mjs','web/navigation.mjs','web/ppid-lookup-ui.mjs','ppid-lookup-worker.js','vendor/package.json','vendor/xlsx.full.min.js','web/file-library.mjs','web/file-library-ui.mjs','web/detail-merge.mjs','web/limits.mjs','web/app.mjs','web/worker.mjs','web/files.mjs','web/matcher.mjs','web/match-corrections.mjs','web/merge-ui.mjs','merge-core.js','merge-worker.js','yield-core.js','yield-worker.js','quality-core.js','threshold-core.js','web/yield-ui.mjs','web/quality-ui.mjs','web/chart-export.mjs','web/defect-analysis.mjs','web/report-context.mjs','web/threshold-ui.mjs','web/index.html','web/build.mjs','browser-storage.js','browser-db-worker.js','autoreport.py','web/update_database.py'])hash.update(await readFile(file));
+for(const file of cloudAssets)hash.update(await readFile('cloud/'+file));
 hash.update(await readFile('web/modern-dashboard.css'));
 hash.update(anonymousCloudMode?'anonymous-cloud':'email-cloud');
 const buildId=hash.digest('hex').slice(0,12);
@@ -33,12 +39,17 @@ for(const name of ['pyodide.js','pyodide.asm.js','pyodide.asm.wasm','python_stdl
 for(const name of ['openpyxl-3.1.5-py2.py3-none-any.whl','et_xmlfile-2.0.0-py3-none-any.whl','opencc_python_reimplemented-0.1.7-py2.py3-none-any.whl'])await copyFile('vendor/python/'+name,'dist/vendor/python/'+name);
 
 await mkdir('dist/cloud');
-for (const name of ['cloud-sync.mjs','part-backup.mjs','cloud-sync.css','cloud-config.js']) await copyFile('cloud/'+name, 'dist/cloud/'+name);
-const cloudSyncPath='dist/cloud/cloud-sync.mjs';
-const cloudSyncSource=await readFile(cloudSyncPath,'utf8');
-const cloudConfigImport="from './cloud-config.js'";
-if(!cloudSyncSource.includes(cloudConfigImport))throw new Error('Could not find the cloud config import to version.');
-await writeFile(cloudSyncPath,cloudSyncSource.replace(cloudConfigImport,`from './cloud-config.js?v=${buildId}'`).replace("from './part-backup.mjs'",`from './part-backup.mjs?v=${buildId}'`));
+for (const name of cloudAssets) {
+  const input='cloud/'+name,output='dist/'+input;
+  if(!cloudImports[name]){await copyFile(input,output);continue;}
+  let source=await readFile(input,'utf8');
+  for(const dependency of cloudImports[name]) {
+    const statement=`from './${dependency}'`;
+    if(!source.includes(statement))throw Error(`Could not version ${dependency} imported by ${name}`);
+    source=source.replace(statement,`from './${dependency}?v=${buildId}'`);
+  }
+  await writeFile(output,source);
+}
 
 let sourceCommit=process.env.VERCEL_GIT_COMMIT_SHA||process.env.AUTOREPORT_SOURCE_COMMIT||null;
 if(!sourceCommit){try{sourceCommit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim();}catch{}}

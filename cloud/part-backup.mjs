@@ -40,8 +40,9 @@ async function derive(crypto, secret, purpose) {
   return crypto.subtle.digest('SHA-256', input);
 }
 
-function encryptionParameters(iv, revision) {
-  const additionalData = encoder.encode(`AutoReport-Part backup v${FORMAT_VERSION}\0revision\0${revision}`);
+function encryptionParameters(iv, revision, context) {
+  const scope = context ? '\0report\0' + context : '';
+  const additionalData = encoder.encode(`AutoReport-Part backup v${FORMAT_VERSION}\0revision\0${revision}` + scope);
   return {name: 'AES-GCM', iv, additionalData, tagLength: TAG_BYTES * 8};
 }
 
@@ -81,7 +82,11 @@ function decodeChunk(encoded) {
   return bytes;
 }
 
-export async function createPartBackupClient({code, request}) {
+export async function partBackupCapability(code) {
+  return hex(new Uint8Array(await derive(webCrypto(), recoverySecret(code), 'cloud-capability')));
+}
+
+export async function createPartBackupClient({code, request, context = ''}) {
   if (typeof request !== 'function') throw Error('缺少雲端備份連線。');
   const crypto = webCrypto();
   const secret = recoverySecret(code);
@@ -101,7 +106,7 @@ export async function createPartBackupClient({code, request}) {
     const bytes = await backupBytes(encoded);
     const revision = expectedRevision + 1;
     const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
-    const sealed = await crypto.subtle.encrypt(encryptionParameters(iv, revision), key, bytes);
+    const sealed = await crypto.subtle.encrypt(encryptionParameters(iv, revision, context), key, bytes);
     const payload = new Uint8Array(HEADER_BYTES + sealed.byteLength);
     payload[0] = FORMAT_VERSION;
     payload.set(iv, 1);
@@ -143,7 +148,7 @@ export async function createPartBackupClient({code, request}) {
     if (payload[0] !== FORMAT_VERSION || length <= HEADER_BYTES + TAG_BYTES) throw Error('雲端備份格式不支援或檔案不完整。');
     const iv = payload.subarray(1, HEADER_BYTES);
     let plaintext;
-    try { plaintext = await crypto.subtle.decrypt(encryptionParameters(iv, revision), key, payload.subarray(HEADER_BYTES, length)); }
+    try { plaintext = await crypto.subtle.decrypt(encryptionParameters(iv, revision, context), key, payload.subarray(HEADER_BYTES, length)); }
     catch { throw Error('無法驗證或解密此備份，請確認復原碼與備份完整性。'); }
     return new Blob([plaintext], {type: 'application/json'});
   }

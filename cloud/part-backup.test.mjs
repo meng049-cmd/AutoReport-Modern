@@ -149,3 +149,15 @@ test('a wrong code, modified ciphertext or replayed ciphertext cannot be restore
   saved.head.revision = 2;
   await assert.rejects(source.download(2), /無法驗證或解密/);
 });
+
+test('ciphertext for one analysis report cannot be restored as a different report', async () => {
+  const code = generateRecoveryCode();
+  const server = fakeCloud();
+  const context = crypto.randomUUID();
+  const client = await createPartBackupClient({code, request: server.request, context});
+  const report = snapshot({id: context});
+  await client.upload(report, 0);
+  assert.equal(await (await client.download()).text(), await report.text());
+  const other = await createPartBackupClient({code, request: server.request, context: crypto.randomUUID()});
+  await assert.rejects(other.download(), /無法驗證或解密/);
+});

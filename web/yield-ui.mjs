@@ -32,11 +32,17 @@ export async function analyzeYieldFiles(files,context={}){
  try{
   const entries=new Map(listLibraryFiles().map(item=>[item.id,item])),single=context.fileIds?.length===1?entries.get(context.fileIds[0]):null,reportId=context.reportId||(single?.kind==='analysis'?single.id:null);
   progress('正在載入分析結果…');
+  const savedReport=reportId?entries.get(reportId):null;
+  const cached=await getAnalysisCache({reportId,selectionKey});
+  const cachedFile=cached&&entries.get(cached.reportId);
+  if(savedReport?.cloudReport){
+   if(!cachedFile||savedReport.cloudWorkbookOnly)throw Error('這份雲端報表可下載 Excel，目前無法開啟看板。');
+   await showReport(cached.data,cached.downloadBlob||savedReport.blob,cached.data.filename||savedReport.name,progress,'已開啟雲端報表的原始分析結果。',context);
+   return;
+  }
   const database=await globalThis.readBrowserDatabase();
   const corrections=database?.reference?.manual_corrections||[];
   const correctionRevision=corrections.length?JSON.stringify(corrections):undefined;
-  const cached=await getAnalysisCache({reportId,selectionKey});
-  const savedReport=reportId?entries.get(reportId):null,cachedFile=cached&&entries.get(cached.reportId);
   if(cachedFile&&cached.correctionRevision===correctionRevision){
    const changed=await attachStageWeekContext(cached.data,{...getYieldOptions(),...context},progress,controller.signal);
    if(changed)await saveAnalysisCache(cached.reportId,cached.data,{downloadBlob:cached.downloadBlob,correctionRevision});
@@ -71,7 +77,7 @@ export async function analyzeYieldFiles(files,context={}){
   const report=new File([data.bytes],data.filename,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});let savedId=reportId;
   if((!savedReport&&context.saveReport!==false)||(savedReport&&(correctionRevision!==undefined||cached?.correctionRevision!==undefined))){
    const analysisInputs=inputs||(!savedReport?{ids:inputIds,files:inputIds?.length?undefined:files,options,sources:data.analysis.sources}:undefined);
-   const entry=await addLibraryFile(report,{kind:'analysis',detail:data.includes_detail!==false,sources:data.analysis.sources,rows:data.output_rows,replaceId:reportId,analysisInputs});savedId=entry.id;
+   const entry=await addLibraryFile(report,{kind:'analysis',detail:data.includes_detail!==false,sources:data.analysis.sources,rows:data.output_rows,replaceId:reportId,analysisInputs,analysisPeriod:{start:data.start_date,end:data.end_date}});savedId=entry.id;
   }
   await attachStageWeekContext(data,{...context,...options},progress,controller.signal);
   let cachedPersistently=true;if(savedId){progress('正在儲存分析快取…');cachedPersistently=await saveAnalysisCache(savedId,data,{selectionKey,inputIds,correctionRevision,downloadBlob:report});}

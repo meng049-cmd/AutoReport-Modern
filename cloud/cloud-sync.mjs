@@ -1,5 +1,6 @@
 import config from './cloud-config.js';
-import {createPartBackupClient,generateRecoveryCode} from './part-backup.mjs';
+import {createPartBackupClient,generateRecoveryCode,partBackupCapability} from './part-backup.mjs';
+import {listLocalReports,packLocalReport,unpackReport,saveLocalReport} from './part-report-data.mjs';
 
 const MAX_BYTES = 50 * 1024 * 1024;
 const APPS = {
@@ -172,34 +173,96 @@ function needsLoginForAnalysis(settings, pageLocation = globalThis.location) {
   if (!pageLocation) return true;
   return pageLocation.protocol !== 'file:' && !['localhost', '127.0.0.1', '[::1]'].includes(pageLocation.hostname);
 }
+function reportMonthNumber(date) {
+  const [year,month]=date.slice(0,7).split('-').map(Number);
+  return year*12+month-1;
+}
+
+const reportUploadTime=new Intl.DateTimeFormat('zh-TW',{
+  month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',timeZone:'Asia/Taipei'
+});
+
+function renderReportChoices(monthSelect,reportSelect,reports,emptyLabel) {
+  const previousMonth=monthSelect.value,previousReport=reportSelect.value;
+  const months=new Set();
+  for(const {start,end} of reports){
+    const first=reportMonthNumber(start),last=reportMonthNumber(end);
+    for(let month=first;month<=last&&month-first<1200;month++){
+      months.add(Math.floor(month/12)+'-'+String(month%12+1).padStart(2,'0'));
+    }
+  }
+  monthSelect.replaceChildren(new Option('所有月份',''),...[...months].sort().reverse().map(month=>new Option(month,month)));
+  if(months.has(previousMonth))monthSelect.value=previousMonth;
+  const month=monthSelect.value;
+  const visible=reports.filter(report=>!month||report.start.slice(0,7)<=month&&report.end.slice(0,7)>=month);
+  reportSelect.replaceChildren(new Option(visible.length?'選擇報表':emptyLabel,''),...visible.map(report=>{
+    const dates=report.start===report.end?report.start:report.start+' ～ '+report.end;
+    const uploaded=Date.parse(report.uploaded_at);
+    const label=report.name||[
+      '版本 '+report.revision,
+      Number.isFinite(uploaded)?'上傳 '+reportUploadTime.format(uploaded):report.id.slice(0,8)
+    ].join(' · ');
+    return new Option(dates+' · '+label,report.id);
+  }));
+  if(visible.some(report=>report.id===previousReport))reportSelect.value=previousReport;
+}
+
+const reportIdPattern=/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+const reportDatePattern=/^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/;
+
 function mountPartBackup(panel) {
   const cloudControls = config.partBackup ? `
-    <p>免帳號。使用同一把復原金鑰在不同電腦上傳與取回備份。請妥善保管金鑰。每份備份上限 50 MB。</p>
+    <p>免帳號。使用復原金鑰跨電腦取回報表。每次選取一份已完成的分析報表，加密後上傳。每份上限 50 MiB。</p>
     <label>復原金鑰 <input id="partBackupCode" type="password" autocomplete="off" spellcheck="false"></label>
     <button type="button" data-backup-action="generate">建立復原金鑰</button>
     <button type="button" data-backup-action="toggle" aria-controls="partBackupCode">顯示金鑰</button>
     <button type="button" data-backup-action="copy">複製金鑰</button>
     <div class="cloud-backup-actions">
-      <button type="button" data-backup-action="upload">上傳本機資料</button>
-      <button type="button" data-backup-action="download">下載雲端備份</button>
-      <button type="button" data-backup-action="restore">還原雲端備份至本機</button>
-    </div>` : '';
-  panel.innerHTML = `<summary>${config.partBackup?'雲端與本機備份':'本機備份'}</summary>${cloudControls}
+      <label>本機分析月份 <select id="partLocalReportMonth"></select></label>
+      <label>本機分析報表 <select id="partLocalReport"></select></label>
+      <button type="button" data-backup-action="upload">上傳所選分析報表</button>
+    </div>
+    <div class="cloud-backup-actions">
+      <button type="button" data-backup-action="index">讀取雲端報表清單</button>
+      <label>雲端分析月份 <select id="partCloudReportMonth"></select></label>
+      <label>雲端分析報表 <select id="partCloudReport"></select></label>
+      <button type="button" data-backup-action="download">下載所選 Excel</button>
+      <button type="button" data-backup-action="restore">加入本機分析檔案庫</button>
+    </div>
+    <details class="cloud-legacy-backup">
+      <summary>取回舊版整站備份</summary>
+      <button type="button" data-backup-action="legacy">下載舊版備份檔</button>
+    </details>` : '';
+  panel.innerHTML = `<summary>${config.partBackup?'雲端分析報表與本機備份':'本機備份'}</summary>${cloudControls}
     <div class="cloud-backup-actions">
       <button type="button" data-backup-action="local">下載料號版本機備份</button>
       <label>還原料號版備份 <input type="file" accept="application/json,.json"></label>
     </div>
     <p class="cloud-status" role="status" aria-live="polite"></p>`;
-  const status=panel.querySelector('[role=status]'), code=panel.querySelector('#partBackupCode');
+  const status=panel.querySelector('[role=status]'),code=panel.querySelector('#partBackupCode');
   const fileInput=panel.querySelector('input[type=file]');
-  const controls=Array.from(panel.querySelectorAll('button,input'));
-  let anonymous, serviceReady=false;
+  const controls=Array.from(panel.querySelectorAll('button,input,select'));
+  const localMonth=panel.querySelector('#partLocalReportMonth'),localReport=panel.querySelector('#partLocalReport');
+  const cloudMonth=panel.querySelector('#partCloudReportMonth'),cloudReport=panel.querySelector('#partCloudReport');
+  let anonymous,serviceReady=false,busy=false,remoteLoaded=false;
+  let localReports=[],cloudReports=[];
+  function refreshLocalChoices(){
+    renderReportChoices(localMonth,localReport,localReports,'本機沒有分析報表');
+  }
+  function refreshCloudChoices(){
+    renderReportChoices(cloudMonth,cloudReport,cloudReports,remoteLoaded?'沒有符合月份的報表':'請先讀取雲端報表清單');
+  }
+  function resetCloudChoices(){
+    remoteLoaded=false;
+    cloudReports=[];
+    refreshCloudChoices();
+  }
   async function rpc(name,body){
     anonymous ||= new CloudClient(config);
     try{
-      if(!serviceReady){
-        const ready=await anonymous.request('/rest/v1/rpc/autoreport_part_backup_ready',{method:'POST',body:{}});
-        if(ready!==true)throw Error('無法確認雲端備份服務已啟用。');
+      if(!serviceReady&&name.includes('_part_report_')){
+        const ready=await anonymous.request('/rest/v1/rpc/autoreport_part_report_ready',{method:'POST',body:{}});
+        if(ready!==true)throw Error('無法確認雲端分析報表服務已啟用。');
         serviceReady=true;
       }
       if(!anonymous.session){
@@ -212,30 +275,70 @@ function mountPartBackup(panel) {
       }
       return await anonymous.request('/rest/v1/rpc/'+name,{method:'POST',body,token:await anonymous.access()});
     }catch(error){
-      if(/Could not find the function|PGRST202/i.test(error.message))throw Error('雲端備份服務尚未啟用。目前可繼續使用本機備份。');
+      if(/Could not find the function|PGRST202/i.test(error.message))throw Error(name.includes('_part_report_')
+        ?'雲端分析報表服務尚未啟用。請由 Supabase 管理員安裝料號版報表備份 SQL。'
+        :'這個站點尚未啟用舊版整站備份。');
       throw error;
     }
   }
+  function clientForReport(report){
+    return createPartBackupClient({code:code.value,context:report.id,request:(name,body)=>rpc(
+      name.replace('_part_backup_','_part_report_'),
+      {...body,p_report:report.id,...(name.endsWith('_begin')?{p_start:report.start,p_end:report.end}:{})}
+    )});
+  }
+  async function loadCloudReports(){
+    const rows=await rpc('autoreport_part_report_list',{p_token:await partBackupCapability(code.value)});
+    if(!Array.isArray(rows)||rows.some(row=>!reportIdPattern.test(row.id)||!reportDatePattern.test(row.start)
+      ||!reportDatePattern.test(row.end)||row.end<row.start||!Number.isSafeInteger(row.revision)||row.revision<1)){
+      throw Error('雲端報表清單格式無效。');
+    }
+    remoteLoaded=true;
+    cloudReports=rows;
+    refreshCloudChoices();
+  }
   async function run(action){
+    if(busy)return;
+    busy=true;
     controls.forEach(control=>control.disabled=true);
     try{await action();}
     catch(error){status.textContent=error.message;}
-    finally{controls.forEach(control=>control.disabled=false);}
+    finally{busy=false;controls.forEach(control=>control.disabled=false);}
+  }
+  if(config.partBackup){
+    refreshLocalChoices();
+    refreshCloudChoices();
+    localMonth.onchange=refreshLocalChoices;
+    cloudMonth.onchange=refreshCloudChoices;
+    code.oninput=resetCloudChoices;
+    panel.addEventListener('toggle',()=>{
+      if(panel.open)void run(async()=>{
+        localReports=await listLocalReports();
+        refreshLocalChoices();
+      });
+    });
   }
   async function readBackup(file){
     if(file.size>MAX_BYTES)throw Error('備份檔超過 50 MB。');
     return validateSnapshot(decode(JSON.parse(await file.text())),config.app);
   }
-  async function replace(snapshot){
-    await saveBackup(await capture(config.app),config.app);
-    if(!confirm('已開始下載目前資料的備份。確定要還原並取代此料號版的本機資料？'))return;
-    await restore(snapshot,config.app);
-    location.reload();
-  }
   fileInput.onchange=()=>run(async()=>{
-    try{if(fileInput.files[0])await replace(await readBackup(fileInput.files[0]));}
-    finally{fileInput.value='';}
+    try{
+      if(!fileInput.files[0])return;
+      const snapshot=await readBackup(fileInput.files[0]);
+      await saveBackup(await capture(config.app),config.app);
+      if(!confirm('已開始下載目前資料的備份。確定要還原並取代此料號版的本機資料？'))return;
+      await restore(snapshot,config.app);
+      location.reload();
+    }finally{fileInput.value='';}
   });
+  function saveReportWorkbook(report){
+    const url=URL.createObjectURL(report.blob),link=document.createElement('a');
+    link.href=url;
+    link.download=report.name;
+    link.click();
+    setTimeout(()=>URL.revokeObjectURL(url),60000);
+  }
   panel.onclick=event=>{
     const action=event.target.dataset.backupAction;
     if(!action)return;
@@ -248,44 +351,57 @@ function mountPartBackup(panel) {
       if(action==='local'){
         await saveBackup(await capture(config.app),config.app);
         status.textContent='本機備份已下載。';
-        return;
-      }
-      if(action==='generate'){
-        if(code.value&&!confirm('要換成新金鑰嗎？取回先前的備份仍需要原金鑰。'))return;
+      }else if(action==='generate'){
+        if(code.value&&!confirm('要換成新金鑰嗎？取回先前的報表仍需要原金鑰。'))return;
         code.value=generateRecoveryCode();
+        resetCloudChoices();
         status.textContent='已建立復原金鑰。請複製並保存在安全的位置。';
-        return;
-      }
-      if(action==='copy'){
+      }else if(action==='copy'){
         if(!code.value.trim())throw Error('請先建立或輸入復原金鑰。');
         await navigator.clipboard.writeText(code.value.trim());
         status.textContent='復原金鑰已複製。';
-        return;
-      }
-      const backup=await createPartBackupClient({code:code.value,request:rpc});
-      status.textContent='正在讀取雲端版本…';
-      const head=await backup.head();
-      if(action==='upload'){
-        if(!confirm(head.revision
-          ?`要上傳本機資料並取代雲端版本 ${head.revision} 嗎？`
-          :'要將本機對照資料庫和檔案庫加密後上傳嗎？')){
+      }else if(action==='legacy'){
+        const backup=await createPartBackupClient({code:code.value,request:rpc});
+        await saveBackup(await readBackup(await backup.download()),config.app);
+        status.textContent='舊版備份已下載。';
+      }else if(action==='index'){
+        status.textContent='正在讀取雲端報表清單…';
+        await loadCloudReports();
+        status.textContent=cloudReports.length?`找到 ${cloudReports.length} 份雲端報表。可用月份查找。`:'這把復原金鑰尚無雲端報表。';
+      }else if(action==='upload'){
+        if(!localReport.value)throw Error('請先選擇一份已完成的分析報表。');
+        await partBackupCapability(code.value);
+        status.textContent='正在準備所選報表…';
+        const id=localReport.value,{payload,start,end,hasDashboard}=await packLocalReport(id);
+        const backup=await clientForReport({id,start,end});
+        const head=await backup.head();
+        if(head.revision&&!confirm(`要取代這份報表的雲端版本 ${head.revision} 嗎？`)){
           status.textContent='已取消上傳。';
           return;
         }
-        status.textContent='正在加密並上傳備份…';
-        const encoded=await encode(await capture(config.app));
-        const revision=await backup.upload(new Blob([JSON.stringify(encoded)]),head.revision);
-        status.textContent=`雲端備份已上傳 · 版本 ${revision}。請保留復原金鑰。`;
+        status.textContent='正在加密並上傳所選報表…';
+        const revision=await backup.upload(payload,head.revision);
+        const message=`分析報表已上傳 · 版本 ${revision}。`+
+          (hasDashboard?'':'這份備份包含 Excel，未包含可互動看板。');
+        await loadCloudReports().catch(()=>{});
+        status.textContent=message;
       }else{
-        if(!head.revision)throw Error('這把復原金鑰尚無雲端備份。');
-        status.textContent='正在下載並解密備份…';
-        const snapshot=await readBackup(await backup.download(head.revision));
-        if(action==='restore'){
-          status.textContent='雲端備份已下載。';
-          await replace(snapshot);
+        const metadata=cloudReports.find(report=>report.id===cloudReport.value);
+        if(!metadata)throw Error('請從雲端清單選擇一份報表。');
+        status.textContent='正在下載並解密所選報表…';
+        const backup=await clientForReport(metadata);
+        const report=await unpackReport(await backup.download(metadata.revision),metadata.id,metadata,
+          {workbookOnly:action==='download'});
+        if(action==='download'){
+          saveReportWorkbook(report);
+          status.textContent='Excel 報表已下載。';
         }else{
-          await saveBackup(snapshot,config.app);
-          status.textContent=`已下載雲端備份 · 版本 ${head.revision}。`;
+          if(!await saveLocalReport(report)){
+            status.textContent='本機已有這份報表。';
+            return;
+          }
+          location.hash='#/reports';
+          location.reload();
         }
       }
     });
