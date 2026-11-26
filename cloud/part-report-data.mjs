@@ -16,7 +16,7 @@ const snapshotKeys = ['date_count', 'input_rows', 'output_rows', 'removed_rows',
   'missing_product_rows', 'pending_product_count', 'skipped_rows', 'timings', 'stageChecks'];
 const analysisKeys = ['total', 'good', 'fail', 'badRate', 'yield', 'products', 'defects', 'processes', 'productProcesses',
   'attribution', 'observations', 'orders', 'dailyProcessTotals', 'dailyProductTotals', 'identityConflicts', 'skippedRows',
-  'sources', 'referenceSources', 'partCorrections', 'period', 'stageWeekContext'];
+  'sources', 'inputFiles', 'referenceSources', 'partCorrections', 'period', 'stageWeekContext'];
 const reserved = new Set(['__proto__', 'constructor', 'prototype', '$arpt']);
 const taipeiDate = new Intl.DateTimeFormat('sv-SE', {timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit'});
 
@@ -353,7 +353,7 @@ export async function saveLocalReport(report) {
         saved = await putCloudEntry(library, {id, name, blob, size: blob.size, lastModified: +now, createdAt: now.toISOString(),
           kind: 'analysis', collection: 'analysis', cloudReport: true, cloudWorkbookOnly: !data,
           analysisPeriod: {start, end}, detail: false, rows: data?.output_rows ?? null,
-          sources: data?.analysis?.sources || [], persistent: true});
+          sources: data?.analysis?.inputFiles?.length ? data.analysis.inputFiles : data?.analysis?.sources || [], persistent: true});
       } catch (error) {
         await recoverCache(cache, key, cloudWriteId, previous);
         throw error;

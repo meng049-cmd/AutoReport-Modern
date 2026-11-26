@@ -76,7 +76,7 @@ export async function analyzeYieldFiles(files,context={}){
   const data=await calculateYieldFile(files,progress,{...options,indexedSources,signal:controller.signal,includeMerged:false,...(reportSources?{sources:reportSources}:{})});
   const report=new File([data.bytes],data.filename,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});let savedId=reportId;
   if((!savedReport&&context.saveReport!==false)||(savedReport&&(correctionRevision!==undefined||cached?.correctionRevision!==undefined))){
-   const analysisInputs=inputs||(!savedReport?{ids:inputIds,files:inputIds?.length?undefined:files,options,sources:data.analysis.sources}:undefined);
+   const analysisInputs=inputs||(!savedReport?{ids:inputIds,files:inputIds?.length?undefined:files,options,sources:data.analysis.sources,names:files.map(file=>file.name)}:undefined);
    const entry=await addLibraryFile(report,{kind:'analysis',detail:data.includes_detail!==false,sources:data.analysis.sources,rows:data.output_rows,replaceId:reportId,analysisInputs,analysisPeriod:{start:data.start_date,end:data.end_date}});savedId=entry.id;
   }
   await attachStageWeekContext(data,{...context,...options},progress,controller.signal);

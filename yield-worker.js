@@ -1,11 +1,38 @@
 const version=new URL(self.location.href).search;
 importScripts('vendor/xlsx.full.min.js'+version,'merge-core.js'+version,'yield-core.js'+version,'quality-core.js'+version,'report-sheets.js'+version,'indexed-detail-store.js'+version,'period-core.js'+version,'browser-storage.js'+version,'analysis-product-corrections.js'+version);
 const MAX_INDEXED_ROWS=1200000;
+const sourceWeekPattern=/(?:^|_)((\d{4})_w(\d{1,2})_(\d{4})-(\d{4}))(?:_|\.xlsx$)/i;
+function sourceWeekFor(files,day){
+ const weeks=new Set();
+ const compact=day.replaceAll('-','');
+ for(const file of files){
+  const label=file.name?.match(sourceWeekPattern);
+  if(!label)continue;
+  const [, ,year,week,start,end]=label;
+  const weekNumber=Number(week);
+  if(weekNumber<1||weekNumber>53)continue;
+  const startYear=Number(year)+(weekNumber>=51&&start.startsWith('01')?1:0);
+  const endYear=startYear+Number(end<start);
+  if(compact>=`${startYear}${start}`&&compact<=`${endYear}${end}`){
+   weeks.add(`${year}_w${week.padStart(2,'0')}`);
+  }
+ }
+ return weeks.size===1?[...weeks][0]:null;
+}
+function analysisWeekKey(files,start,end){
+ const periods=AutoReportPeriods;
+ const sourceStart=sourceWeekFor(files,start),sourceEnd=sourceWeekFor(files,end);
+ const useSourceWeeks=sourceStart&&sourceEnd&&sourceStart<=sourceEnd;
+ const first=useSourceWeeks?sourceStart:periods.periodFor(start,'week').key.slice(0,-1);
+ const last=useSourceWeeks?sourceEnd:periods.periodFor(end,'week').key.slice(0,-1);
+ if(first===last)return first;
+ return first+'-'+(first.slice(0,4)===last.slice(0,4)?last.slice(5):last);
+}
 function analysisFilename(files,period,stats){
- const source=files.length===1?files[0].name?.match(/(?:^|_)(\d{4}_w\d{1,2}_\d{4}-\d{4})(?:_|\.xlsx$)/i):null;
+ const source=files.length===1?files[0].name?.match(sourceWeekPattern):null;
  if(!period&&source)return `${source[1]}_不良分析.xlsx`;
  const start=period?.start_date||stats.start_date,end=period?.end_date||stats.end_date;
- const key=(period?.key||AutoReportPeriods.periodFor(start,'week').key).replace(/_$/,'');
+ const key=period&&period.mode!=='week'?period.key:analysisWeekKey(files,start,end);
  const compact=day=>day.slice(5).replace('-','');
  const range=start.slice(0,4)===end.slice(0,4)?`${compact(start)}-${compact(end)}`:`${start}-${end}`;
  return `${key}_${range}_不良分析.xlsx`;
@@ -30,6 +57,7 @@ self.onmessage=async({data})=>{try{
  const analysis=analyzeQuality(merger);analysis.skippedRows=merger.skippedRows;
  timings.quality=performance.now()-phase;phase=performance.now();
  analysis.sources=data.sources||[...merger.sources].map(name=>({name,kind:'Detail'}));analysis.referenceSources=data.referenceSources||[];try{const saved=files.length===1?JSON.parse(inputBook?.Custprops?.AutoReportReferenceSources||'null'):null;if(Array.isArray(saved)&&saved.every(name=>typeof name==='string'))analysis.referenceSources=saved;}catch{}inputBook=null;
+ analysis.inputFiles=files.map(({name,size})=>({name,size}));
  analysis.partCorrections=[...appliedCorrections];
  const {book,calculation,...stats}=buildYieldReport(merger,analysis.identities,{includeDetail:!indexed,period});applyProductPPIDYield(analysis);
  if(indexed){merger.rows.clear();merger.defectKeys.clear();merger.firstNG.clear();merger.analysisFirstNG.clear();analysis.identities.clear();}

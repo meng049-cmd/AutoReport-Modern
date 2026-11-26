@@ -9,11 +9,39 @@ test('analysis filenames retain the source reporting label and use a compact per
  assert.equal(ctx.analysisFilename([{name:'AUTOREPORT 工單查找與品質分析_2026_w43_1101-1107_IC機種.xlsx'}],null,stats),'2026_w43_1101-1107_不良分析.xlsx');
  assert.equal(ctx.analysisFilename([],ctx.AutoReportPeriods.periodFor('2026-11-01','week'),stats),'2026_w43_1101-1107_不良分析.xlsx');
  assert.equal(ctx.analysisFilename([{name:'Detail.xlsx'}],null,stats),'2026_w43_1102-1106_不良分析.xlsx');
+ const periods=ctx.AutoReportPeriods;
+ const weekly=periods.rangeFor(periods.periodFor('2026-10-25','week'),periods.periodFor('2026-11-07','week'));
+ assert.equal(ctx.analysisFilename([],weekly,stats),'2026_w42-w43_1025-1107_不良分析.xlsx');
+ const crossYear={start_date:'2025-12-28',end_date:'2026-01-17'};
+ assert.match(ctx.analysisFilename([{name:'first.xlsx'},{name:'last.xlsx'}],null,crossYear),/^2025_w\d+-2026_w01_2025-12-28-2026-01-17_不良分析\.xlsx$/);
 });
 const header=['製程','工單','料號','品名規格','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種'];
 const row=(serial,day,status='GOOD',defect='',order='WO')=>['DAF外觀',order,'P','N',serial,(Date.parse(day+'T00:00:00Z')-Date.UTC(1899,11,30))/86400000,'OP',defect,status,'Goodix','Model'];
 function prepared(ctx,rows,key){const book=ctx.XLSX.utils.book_new();ctx.XLSX.utils.book_append_sheet(book,ctx.XLSX.utils.aoa_to_sheet([header,...rows]),'Detail');const merger=new ctx.DetailMerger(ctx.XLSX);merger.add(book,key+'.xlsx');return {meta:{key,name:key+'.xlsx',header,complete:true,dayCounts:Object.fromEntries([...new Set([...merger.rows.values()].map(v=>v.day))].map(day=>[day,[...merger.rows.values()].filter(v=>v.day===day).length])),sources:[key+'.xlsx'],firstNG:[...merger.firstNG.values()],analysisFirstNG:[...merger.analysisFirstNG.values()],skippedRows:[]},values:[...merger.rows.values()].map((v,seq)=>({...v,seq,fail:merger.hasDefect(v)}))};}
 function useStore(ctx,items){let scans=0;ctx.AutoReportDetailIndex={meta:async key=>items.get(key)?.meta,scan:async(key,period,visit)=>{scans++;for(const v of [...items.get(key).values].sort((a,b)=>a.day.localeCompare(b.day)||a.seq-b.seq))if(ctx.AutoReportPeriods.contains(period,v.day))visit(v);}};return ()=>scans;}
+test('three selected Detail files keep the source week labels, date span, and separate workbook source rows',async()=>{
+ const {ctx,messages}=runtime();
+ const files=[
+  ['2025_w41_1012-1018','2025-10-18'],
+  ['2025_w39_0928-1004','2025-09-28'],
+  ['2025_w40_1005-1011','2025-10-07']
+ ].map(([key,day])=>{
+  const book=ctx.XLSX.utils.book_new();
+  ctx.XLSX.utils.book_append_sheet(book,ctx.XLSX.utils.aoa_to_sheet([header,row(key,day)]),'Detail');
+  const bytes=ctx.XLSX.write(book,{type:'array',bookType:'xlsx'});
+  return {name:`AUTOREPORT_${key}_IC機種.xlsx`,size:bytes.byteLength,arrayBuffer:async()=>bytes};
+ });
+ await ctx.onmessage({data:{files,sources:files.map((_,index)=>({name:`Raw ${index}.xlsx`}))}});
+ const result=messages.at(-1);
+ assert.equal(result.type,'complete',result.message);
+ assert.equal(result.filename,'2025_w39-w41_0928-1018_不良分析.xlsx');
+ assert.equal(result.start_date,'2025-09-28');
+ assert.equal(result.end_date,'2025-10-18');
+ assert.equal(result.analysis.total,3);
+ const report=ctx.XLSX.read(result.bytes,{type:'array'});
+ const sources=ctx.XLSX.utils.sheet_to_json(report.Sheets['資料來源'],{header:1});
+ assert.deepEqual(Array.from(sources.filter(row=>row[0]==='選取的 Detail 檔案'),row=>row[1]),files.map(file=>file.name));
+});
 test('reporting weeks preserve W42 and include cross-month week boundaries; month handles leap years',()=>{
  const {ctx}=runtime(),p=ctx.AutoReportPeriods;
  for(const day of ['2026-10-25','2026-10-31']){const w=p.periodFor(day,'week');assert.equal(w.key,'2026_w42_');assert.equal(w.start_date,'2026-10-25');assert.equal(w.end_date,'2026-10-31');}
