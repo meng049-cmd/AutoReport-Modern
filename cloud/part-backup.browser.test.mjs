@@ -6,7 +6,7 @@ import {test} from 'node:test';
 import {chromium} from '@playwright/test';
 import ExcelJS from 'exceljs';
 
-test('encrypted analysis reports are selected by month and reopen on another browser', {timeout:90000}, async () => {
+test('an acknowledged report upload persists through a failed list refresh and reopens on another browser', {timeout:90000}, async () => {
   const root=resolve('dist');
   const server=createServer(async (request,response)=>{
     const pathname=new URL(request.url,'http://localhost').pathname;
@@ -19,12 +19,13 @@ test('encrypted analysis reports are selected by month and reopen on another bro
     }catch{response.writeHead(404).end();}
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-  let browser;
+  let browser,releaseAutoList;
   try{
     browser=await chromium.launch({executablePath:process.env.BROWSER_EXECUTABLE||'/usr/bin/chromium',args:['--no-sandbox']});
     const first=await browser.newContext(),second=await browser.newContext();
-    const reports=new Map(),callers=new Set();
-    let anonymousCount=0;
+    const reports=new Map(),callers=new Set(),commitAttempts=[];
+    let anonymousCount=0,senderListCount=0,commitAcknowledgmentLost=false;
+    const autoListGate=new Promise(resolve=>{releaseAutoList=resolve;});
     const uploadId='d0676e5a-4740-43d0-8cd3-ace4ad042eed';
     const uploadedAt='2026-11-25T00:00:00Z';
     for(const context of [first,second]){
@@ -41,9 +42,14 @@ test('encrypted analysis reports are selected by month and reopen on another bro
           return;
         }
         callers.add(route.request().headers().authorization);
-        const {p_token:token,p_report:id,p_index:index,p_data:data,p_start:start,p_end:end}=route.request().postDataJSON();
+        const {p_token:token,p_report:id,p_index:index,p_data:data,p_start:start,p_end:end,p_upload:upload}=route.request().postDataJSON();
         const action=path.split('autoreport_part_report_')[1];
         if(action==='list'){
+          if(context===first&&++senderListCount===1){
+            await autoListGate;
+            await route.fulfill({status:503,json:{message:'test: list temporarily unavailable'}});
+            return;
+          }
           await route.fulfill({json:[...reports.values()].filter(report=>report.token===token&&report.revision).map(report=>({
             id:report.id,start:report.start,end:report.end,revision:report.revision,uploaded_at:uploadedAt,chunks:report.items.length
           }))});
@@ -55,14 +61,24 @@ test('encrypted analysis reports are selected by month and reopen on another bro
         const head=()=>({revision:report.revision,chunks:report.revision?report.items.length:0,updated_at:report.revision?uploadedAt:null});
         if(action==='head')await route.fulfill({json:head()});
         else if(action==='begin'){
-          report.start=start;
-          report.end=end;
+          report.staged={uploadId,start,end,items:[]};
           await route.fulfill({json:uploadId});
         }else if(action==='put'){
-          report.items[index]=data;
+          assert.equal(report.staged.uploadId,upload);
+          report.staged.items[index]=data;
           await route.fulfill({status:204});
         }else if(action==='commit'){
-          report.revision++;
+          commitAttempts.push({id,upload});
+          if(report.activeUpload!==upload){
+            assert.equal(report.staged.uploadId,upload);
+            const {start,end,items}=report.staged;
+            Object.assign(report,{revision:report.revision+1,activeUpload:upload,staged:null,start,end,items});
+            if(!commitAcknowledgmentLost){
+              commitAcknowledgmentLost=true;
+              await route.abort();
+              return;
+            }
+          }
           await route.fulfill({json:head()});
         }else if(action==='get')await route.fulfill({json:report.items[index]});
         else await route.fulfill({status:404,json:{message:'unexpected endpoint'}});
@@ -72,6 +88,7 @@ test('encrypted analysis reports are selected by month and reopen on another bro
     const sender=await first.newPage();
     for(const [date,serial] of [['2026-10-24','OCT-SAMPLE'],['2026-11-16','NOV-SAMPLE']]){
       await sender.goto(site+'/#yield');
+      await sender.waitForFunction(()=>document.querySelector('#message').textContent.includes('對照資料已載入'));
       const book=new ExcelJS.Workbook();
       book.addWorksheet('Detail').addRows([
         ['製程','工單','料號','品名規格','小板序號','產出時間','操作人員','不良項目','狀態','IC','機種'],
@@ -91,10 +108,27 @@ test('encrypted analysis reports are selected by month and reopen on another bro
     const code=await sender.locator('#partBackupCode').inputValue();
     await sender.locator('#partLocalReportMonth').selectOption('2026-11');
     await sender.locator('#partLocalReport').selectOption({index:1});
-    await sender.getByRole('button',{name:'上傳所選分析報表'}).click();
-    await sender.getByText('分析報表已上傳', {exact:false}).waitFor();
+    const isReportList=request=>new URL(request.url()).pathname.endsWith('/autoreport_part_report_list');
+    const receipt=sender.locator('#partReportUploadStatus');
+    let autoListResponse;
+    try{
+      await Promise.all([
+        sender.waitForRequest(isReportList,{timeout:12000}),
+        sender.getByRole('button',{name:'上傳所選分析報表'}).click()
+      ]);
+      await receipt.filter({hasText:/分析報表已上傳.*版本 1/}).waitFor({timeout:5000});
+      autoListResponse=sender.waitForResponse(response=>isReportList(response.request()),{timeout:5000});
+    }finally{releaseAutoList();}
+    assert.equal((await autoListResponse).status(),503);
+    const receiptBeforeReload=await receipt.textContent();
+    await sender.getByRole('button',{name:'讀取雲端報表清單'}).click();
+    await sender.getByText('找到 1 份雲端報表。', {exact:false}).waitFor();
+    assert.equal(await receipt.textContent(),receiptBeforeReload);
+    assert.equal(senderListCount,2);
     assert.equal(reports.size,1);
     const [snapshot]=reports.values();
+    assert.equal(snapshot.revision,1);
+    assert.deepEqual(commitAttempts,[{id:snapshot.id,upload:uploadId},{id:snapshot.id,upload:uploadId}]);
     assert.equal(snapshot.start,'2026-11-16');
     assert.ok(!code.includes(snapshot.token));
     assert.ok(!Buffer.concat(snapshot.items.map(chunk=>Buffer.from(chunk,'base64'))).includes('NOV-SAMPLE'));
@@ -125,6 +159,7 @@ test('encrypted analysis reports are selected by month and reopen on another bro
     assert.match(await receiver.locator('#defectDetailTable').textContent(),/NOV-SAMPLE/);
     assert.deepEqual([...callers].sort(),['Bearer session-1','Bearer session-2']);
   }finally{
+    releaseAutoList?.();
     await browser?.close();
     await new Promise(resolve=>server.close(resolve));
   }

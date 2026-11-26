@@ -126,6 +126,23 @@ test('malformed codes, oversized snapshots and interrupted uploads are refused',
   await assert.rejects(client.download(), /沒有可下載/);
 });
 
+test('an unconfirmed commit checks the same upload before reporting an unknown outcome', async () => {
+  const server = fakeCloud();
+  const attempts = [];
+  const client = await createPartBackupClient({code: generateRecoveryCode(), async request(name, params) {
+    if (name === prefix + 'commit') {
+      attempts.push(params.p_upload);
+      throw new DOMException('response timed out', 'TimeoutError');
+    }
+    return server.request(name, params);
+  }});
+  await assert.rejects(client.upload(snapshot({report: true}), 0), /未能確認這次上傳是否完成/);
+  assert.equal(attempts.length, 2);
+  assert.equal(attempts[0], attempts[1]);
+  assert.equal(server.uploads.size, 0);
+  assert.deepEqual(await client.head(), empty);
+});
+
 test('a wrong code, modified ciphertext or replayed ciphertext cannot be restored', async () => {
   const code = generateRecoveryCode();
   const server = fakeCloud();

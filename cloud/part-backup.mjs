@@ -62,6 +62,11 @@ async function backupBytes(encoded) {
   return encoded instanceof Blob ? new Uint8Array(await encoded.arrayBuffer()) : encoded;
 }
 
+function canRetryCommit(error) {
+  return ['TimeoutError', 'TypeError', 'SyntaxError'].includes(error.name) ||
+    error.status === 408 || error.status === 429 || error.status >= 500;
+}
+
 function encodeChunk(bytes) {
   let binary = '';
   for (let offset = 0; offset < bytes.length; offset += 32768) {
@@ -99,7 +104,7 @@ export async function createPartBackupClient({code, request, context = ''}) {
   const rpc = (operation, params = {}) => request(RPC_PREFIX + operation, {p_token: token, ...params});
   const head = async () => readHead(await rpc('head'));
 
-  async function upload(encoded, expectedRevision) {
+  async function upload(encoded, expectedRevision, {onProgress} = {}) {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || expectedRevision >= Number.MAX_SAFE_INTEGER) {
       throw Error('請先讀取雲端備份版本，再上傳。');
     }
@@ -118,12 +123,26 @@ export async function createPartBackupClient({code, request, context = ''}) {
     }
 
     try {
+      onProgress?.({uploaded: 0, total: count});
       for (let index = 0; index < count; index++) {
         const offset = index * CHUNK_BYTES;
         const chunk = encodeChunk(payload.subarray(offset, offset + CHUNK_BYTES));
         await rpc('put', {p_upload: uploadId, p_index: index, p_data: chunk});
+        onProgress?.({uploaded: index + 1, total: count});
       }
-      const committed = readHead(await rpc('commit', {p_upload: uploadId}));
+      const commit = () => rpc('commit', {p_upload: uploadId});
+      let receipt;
+      try {
+        receipt = await commit();
+      } catch (error) {
+        if (!canRetryCommit(error)) throw error;
+        onProgress?.({uploaded: count, total: count, confirmingAgain: true});
+        try { receipt = await commit(); }
+        catch (cause) {
+          throw Error('未能確認這次上傳是否完成。請讀取雲端報表清單，核對此報表的分析期間與版本。', {cause});
+        }
+      }
+      const committed = readHead(receipt);
       if (committed.revision !== revision || committed.chunks !== count) throw Error('雲端確認的備份版本與本次上傳不同。');
       return revision;
     } catch (error) {

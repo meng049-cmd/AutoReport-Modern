@@ -7,4 +7,5 @@ body>.cloud-sync{margin:20px auto;padding:18px;max-width:1100px;width:calc(100% 
 .cloud-sync .cloud-backup-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:12px 0}
 .cloud-sync .cloud-backup-actions label{max-width:100%}
 .cloud-sync .cloud-backup-actions select{display:block;width:100%;max-width:min(34rem,100%);text-overflow:ellipsis}
+.cloud-sync .cloud-upload-status:not(:empty){padding:8px 12px;border-left:3px solid #174c75;background:#e8f0f9}
 .cloud-sync #partBackupCode{width:min(100%,34rem);margin:5px 0 8px;font-family:ui-monospace,monospace}
